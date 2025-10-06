@@ -1,0 +1,181 @@
+# =============================================================================
+# VeilForge - Advanced Steganography Suite - .gitignore
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.sublime-project
+.sublime-workspace
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Test Files & Artifacts
+test_*.mp4
+test_*.avi
+test_*.mp3
+test_*.wav
+test_*.jpg
+test_*.jpeg
+test_*.png
+test_*.pdf
+test_*.txt
+test_*.docx
+debug_*.mp4
+debug_*.avi
+debug_*.wav
+temp_*.avi
+temp_*.mp4
+*_test_*.jpg
+*_test_*.png
+quality_test_*
+large_test_*
+enhanced_test_*
+ultra_test_*
+lossless_test_*
+large_perfect_*
+
+# Output Files
+outputs/
+temp/
+uploads/
+test_files/
+output*.png
+output*.jpg
+output*.mp4
+output*.avi
+output*.wav
+output*.mp3
+output*.pdf
+output*.txt
+output*.docx
+extracted_*
+hidden_*
+stego_*
+*_output.*
+*_stego.*
+
+# Demo & Sample Files (keep some for testing)
+demo_audio.*
+demo_video.*
+basic_stego.*
+basic_test.*
+simple_stego.*
+simple_test.*
+small_test.*
+working_*
+final_demo.*
+final_stego_*
+integration_*
+
+# Analysis & Debug Files
+analyze_*
+debug_*
+temp.*
+*.tmp
+
+# Logs
+*.log
+logs/
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Package files
+*.egg-info/
+dist/
+build/
+
+# Documentation build
+docs/_build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Large media files (except essential ones)
+*.mkv
+*.mov
+*.wmv
+*.flv
+*.webm
+*.m4a
+*.aac
+*.ogg
+*.flac
+
+# Keep essential demo files (uncomment if needed)
+# !demo_video.mp4
+# !demo_audio.mp3
+
+# Application-specific temporary files
+metadata.json
+capacity_report.txt
