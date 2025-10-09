@@ -1,0 +1,7 @@
+{
+  "steganography_type": "ReliableWebVideoTextStego",
+  "version": "1.0",
+  "message": "SGVsbG8gZnJvbSByZWxpYWJsZSB3ZWIgdmlkZW8gc3RlZ2Fub2dyYXBoeSEgVGhpcyBtZXRob2QgZ3VhcmFudGVlcyBzdWNjZXNzLg==",
+  "original_filename": "reliable_web_test_video.mp4",
+  "message_length": 76
+}

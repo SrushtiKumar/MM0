@@ -20,15 +20,121 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 # Import our steganography modules
-from stego_cli import SteganographyManager, ContainerAnalyzer
-from stego_cli_enhanced import SteganographyManagerEnhanced
-from simple_stego import SimpleSteganographyManager
-from simple_audio_stego import SimpleAudioSteganographyManager
-from working_audio_stego import WorkingAudioSteganographyManager
-from final_audio_stego import FinalAudioSteganographyManager
-from final_video_steganography import FinalVideoSteganographyManager
-from fast_video_stego import FastVideoSteganographyManager
-from robust_video_stego import RobustVideoSteganographyManager
+try:
+    from final_video_steganography import FinalVideoSteganographyManager
+except ImportError:
+    FinalVideoSteganographyManager = None
+
+try:
+    from video_steganography import VideoSteganographyManager
+except ImportError:
+    VideoSteganographyManager = None
+
+try:
+    from universal_file_audio import UniversalFileAudio
+except ImportError:
+    UniversalFileAudio = None
+
+try:
+    from universal_file_steganography import UniversalFileSteganography
+except ImportError:
+    UniversalFileSteganography = None
+
+try:
+    from universal_text_audio_stego import UniversalTextAudioSteganographyManager
+except ImportError:
+    UniversalTextAudioSteganographyManager = None
+
+try:
+    from reliable_audio_stego import ReliableAudioSteganographyManager
+except ImportError:
+    ReliableAudioSteganographyManager = None
+
+try:
+    from simple_text_audio_stego import SimpleTextAudioSteganographyManager
+except ImportError:
+    SimpleTextAudioSteganographyManager = None
+
+try:
+    from working_audio_stego import WorkingAudioSteganographyManager
+except ImportError:
+    WorkingAudioSteganographyManager = None
+
+try:
+    from final_audio_stego import FinalAudioSteganographyManager
+except ImportError:
+    FinalAudioSteganographyManager = None
+
+try:
+    from simple_audio_stego import SimpleAudioSteganographyManager
+except ImportError:
+    SimpleAudioSteganographyManager = None
+
+# Create dummy classes for missing modules to prevent import errors
+class DummySteganographyManager:
+    def __init__(self, *args, **kwargs):
+        pass
+    def hide_data(self, *args, **kwargs):
+        raise NotImplementedError("This steganography method is not available")
+    def extract_data(self, *args, **kwargs):
+        raise NotImplementedError("This steganography method is not available")
+
+# Assign dummy classes for missing modules
+SteganographyManager = DummySteganographyManager
+ContainerAnalyzer = DummySteganographyManager  
+SteganographyManagerEnhanced = DummySteganographyManager
+SimpleSteganographyManager = DummySteganographyManager
+FastVideoSteganographyManager = DummySteganographyManager
+
+# Use real video steganography if available
+try:
+    from final_web_video_text_stego import FinalWebVideoTextSteganographyManager
+    RobustVideoSteganographyManager = FinalWebVideoTextSteganographyManager
+    print("✅ Using FinalWebVideoTextSteganographyManager")
+except ImportError:
+    try:
+        from reliable_web_video_text_stego import ReliableWebVideoTextSteganographyManager
+        RobustVideoSteganographyManager = ReliableWebVideoTextSteganographyManager
+        print("✅ Using ReliableWebVideoTextSteganographyManager")
+    except ImportError:
+        try:
+            from robust_web_video_text_stego import RobustWebVideoTextSteganographyManager
+            RobustVideoSteganographyManager = RobustWebVideoTextSteganographyManager
+            print("✅ Using RobustWebVideoTextSteganographyManager")
+        except ImportError:
+            try:
+                from working_video_text_stego import WorkingVideoTextSteganographyManager
+                RobustVideoSteganographyManager = WorkingVideoTextSteganographyManager
+                print("✅ Using WorkingVideoTextSteganographyManager")
+            except ImportError:
+                try:
+                    from web_video_text_stego import WebVideoTextSteganographyManager
+                    RobustVideoSteganographyManager = WebVideoTextSteganographyManager
+                    print("✅ Using WebVideoTextSteganographyManager")
+                except ImportError:
+                    if VideoSteganographyManager is not None:
+                        RobustVideoSteganographyManager = VideoSteganographyManager
+                        print("✅ Using VideoSteganographyManager")
+                    elif FinalVideoSteganographyManager is not None:
+                        RobustVideoSteganographyManager = FinalVideoSteganographyManager
+                        print("✅ Using FinalVideoSteganographyManager")
+                    else:
+                        RobustVideoSteganographyManager = DummySteganographyManager
+                        print("⚠️ Using DummySteganographyManager - no video steganography available")
+
+# Use real classes for audio if available, otherwise use dummy
+if UniversalTextAudioSteganographyManager is None:
+    UniversalTextAudioSteganographyManager = DummySteganographyManager
+if ReliableAudioSteganographyManager is None:
+    ReliableAudioSteganographyManager = DummySteganographyManager
+if SimpleTextAudioSteganographyManager is None:
+    SimpleTextAudioSteganographyManager = DummySteganographyManager
+if SimpleAudioSteganographyManager is None:
+    SimpleAudioSteganographyManager = DummySteganographyManager
+if WorkingAudioSteganographyManager is None:
+    WorkingAudioSteganographyManager = DummySteganographyManager
+if FinalAudioSteganographyManager is None:
+    FinalAudioSteganographyManager = DummySteganographyManager
 
 # Configuration
 UPLOAD_DIR = Path("uploads")
@@ -343,12 +449,12 @@ async def process_hide_job(
                 output_path = final_output
                 
         elif file_ext in ['wav', 'mp3', 'flac', 'ogg', 'm4a', 'aac']:
-            # Use the new Final Audio Steganography that supports multiple formats!
-            print(f"[DEBUG] Using Final Audio Steganography for: {file_ext}")
+            # Use Universal Text Audio Steganography (uses working UniversalFileAudio logic)
+            print(f"[DEBUG] Using Universal Text Audio Steganography for: {file_ext}")
             
             try:
-                # Use the final working audio steganography
-                audio_manager = FinalAudioSteganographyManager(request_obj.password)
+                # Use the universal text audio steganography that works
+                audio_manager = UniversalTextAudioSteganographyManager(request_obj.password)
                 
                 # Pass the original filename when embedding files to preserve extension
                 original_filename = None
@@ -497,12 +603,12 @@ async def process_extract_job(
             }
             
         elif file_ext in ['wav', 'mp3', 'flac', 'ogg', 'm4a', 'aac']:
-            # Use the new Final Audio Steganography for extraction
-            print(f"[DEBUG] Using Final Audio Steganography extraction for: {file_ext}")
+            # Use Universal Text Audio Steganography for extraction
+            print(f"[DEBUG] Using Universal Text Audio Steganography extraction for: {file_ext}")
             
             try:
-                # Use the final working audio steganography
-                audio_manager = FinalAudioSteganographyManager(request_obj.password)
+                # Use the universal text audio steganography
+                audio_manager = UniversalTextAudioSteganographyManager(request_obj.password)
                 extracted_data, filename = audio_manager.extract_data(str(container_path))
                 result_dict = {
                     "success": True,

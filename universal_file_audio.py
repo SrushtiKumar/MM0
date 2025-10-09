@@ -207,7 +207,7 @@ class UniversalFileAudio:
                     coeff_idx = bit_idx * self.redundancy + r
                     if coeff_idx < len(detail_band):
                         original_coeff = detail_band[coeff_idx]
-                        min_magnitude = 0.005  # Subtle embedding
+                        min_magnitude = 0.02  # Increased magnitude for more robust embedding
                         magnitude = max(abs(original_coeff), min_magnitude)
                         
                         if bit_val == 1:
@@ -292,7 +292,8 @@ class UniversalFileAudio:
                     coeff_idx = bit_idx * self.redundancy + r
                     if coeff_idx < len(detail_band):
                         coeff = detail_band[coeff_idx]
-                        vote = 1 if coeff > 0.001 else 0
+                        # Use a more robust threshold
+                        vote = 1 if coeff > 0.01 else 0
                         votes.append(vote)
                 
                 if votes:
@@ -300,6 +301,10 @@ class UniversalFileAudio:
                     all_bits.append(str(bit_value))
         
         print(f"📊 Total extracted bits: {len(all_bits)}")
+        
+        # Debug: Show first few bits
+        if len(all_bits) > 64:
+            print(f"[DEBUG] First 64 bits: {''.join(all_bits[:64])}")
         
         # Convert to bytes
         extracted_bytes = []
@@ -309,11 +314,14 @@ class UniversalFileAudio:
                 byte_val = int(byte_bits, 2)
                 extracted_bytes.append(byte_val)
         
+        print(f"[DEBUG] First 10 extracted bytes: {extracted_bytes[:10]}")
+        
         if len(extracted_bytes) < 4:
             raise ValueError("Not enough data extracted")
         
         # Parse header
         header_length = int.from_bytes(bytes(extracted_bytes[:4]), 'little')
+        print(f"[DEBUG] Header length from bytes: {header_length}")
         
         if header_length <= 0 or header_length > 1000:
             raise ValueError(f"Invalid header length: {header_length}")
@@ -322,7 +330,24 @@ class UniversalFileAudio:
             raise ValueError("Not enough bytes for header")
         
         header_bytes = bytes(extracted_bytes[4:4+header_length])
-        header = json.loads(header_bytes.decode('utf-8'))
+        print(f"[DEBUG] Header bytes (first 20): {header_bytes[:20]}")
+        print(f"[DEBUG] Header length: {header_length}")
+        
+        try:
+            header_str = header_bytes.decode('utf-8')
+            print(f"[DEBUG] Header string: {header_str[:100]}...")
+            header = json.loads(header_str)
+        except UnicodeDecodeError as e:
+            print(f"[ERROR] Unicode decode error: {e}")
+            print(f"[DEBUG] Raw bytes: {header_bytes}")
+            # Try latin-1 encoding as fallback
+            try:
+                header_str = header_bytes.decode('latin-1')
+                header = json.loads(header_str)
+                print(f"[DEBUG] Successfully decoded with latin-1")
+            except Exception as e2:
+                print(f"[ERROR] Latin-1 also failed: {e2}")
+                raise ValueError(f"Cannot decode header: {e}")
         
         print(f"📋 Header: {header}")
         
