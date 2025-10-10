@@ -801,8 +801,47 @@ async def process_extract_job(
             print(f"[DEBUG] Using Robust Video Steganography extraction for: {file_ext}")
             
             try:
+                print(f"[DEBUG] Creating RobustVideoSteganographyManager with password: '{request_obj.password}'")
                 video_manager = RobustVideoSteganographyManager(request_obj.password)
-                extracted_data, filename = video_manager.extract_data(str(container_path))
+                print(f"[DEBUG] Manager created: {type(video_manager).__name__}")
+                print(f"[DEBUG] Manager password: '{video_manager.password if hasattr(video_manager, 'password') else 'NO PASSWORD ATTR'}'")
+                
+                print(f"[DEBUG] Calling extract_data on file: {container_path}")
+                
+                # CRITICAL SECURITY FIX: Add explicit password validation
+                try:
+                    extracted_data, filename = video_manager.extract_data(str(container_path))
+                    print(f"[DEBUG] Extract result: data={type(extracted_data) if extracted_data else None}, size={len(extracted_data) if extracted_data else 0}, filename={filename}")
+                    
+                    # SECURITY CHECK: If data was extracted, verify it's not due to a bypass
+                    if extracted_data and filename:
+                        # Double-check by attempting extraction with a known wrong password
+                        print(f"[SECURITY] Performing additional password validation...")
+                        test_wrong_manager = RobustVideoSteganographyManager("__INTENTIONALLY_WRONG_PASSWORD__")
+                        try:
+                            test_data, test_filename = test_wrong_manager.extract_data(str(container_path))
+                            if test_data and test_filename:
+                                # If wrong password also succeeds, there's a vulnerability!
+                                print(f"[SECURITY] ❌ CRITICAL: Wrong password also extracted data - REJECTING!")
+                                error_msg = "Security validation failed: Password protection may be compromised"
+                                print(f"[ERROR] {error_msg}")
+                                jobs[job_id].status = "failed"
+                                jobs[job_id].message = error_msg
+                                jobs[job_id].error = "Security validation failed"
+                                return
+                            else:
+                                print(f"[SECURITY] ✅ Password validation passed - wrong password properly failed")
+                        except Exception as security_e:
+                            print(f"[SECURITY] ✅ Password validation passed - wrong password raised error: {security_e}")
+                    
+                except ValueError as ve:
+                    # This should be a password error - let it propagate
+                    if "Data corruption detected or wrong password" in str(ve):
+                        print(f"[DEBUG] Proper password validation error: {ve}")
+                        raise ve
+                    else:
+                        print(f"[DEBUG] Other ValueError: {ve}")
+                        raise ve
                 
                 if extracted_data and filename:
                     result_dict = {
@@ -822,6 +861,19 @@ async def process_extract_job(
                     return
                     
             except Exception as e:
+                print(f"[DEBUG] Exception type: {type(e).__name__}")
+                print(f"[DEBUG] Exception message: {str(e)}")
+                print(f"[DEBUG] Exception details: {repr(e)}")
+                
+                # Check if this is a password validation error
+                if "Data corruption detected or wrong password" in str(e):
+                    error_msg = f"Password validation failed: {str(e)}"
+                    print(f"[ERROR] {error_msg}")
+                    jobs[job_id].status = "failed"
+                    jobs[job_id].message = error_msg
+                    jobs[job_id].error = str(e)
+                    return
+                
                 error_msg = f"Video extraction failed: {str(e)}. Please ensure the video file contains hidden data created with this system."
                 print(f"[ERROR] {error_msg}")
                 jobs[job_id].status = "failed"
