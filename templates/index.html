@@ -142,6 +142,50 @@
             font-size: 1.5rem;
             margin: 0 auto 1rem;
         }
+
+        /* Password functionality styles */
+        .alert-sm {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.875rem;
+        }
+
+        #hidePasswordInfo .font-monospace {
+            background: rgba(0, 0, 0, 0.05);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            color: #0d6efd;
+        }
+
+        .input-group .btn {
+            border-left: none;
+        }
+
+        .input-group .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .password-tooltip {
+            position: relative;
+        }
+
+        .password-strength {
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        .password-strength-bar {
+            height: 100%;
+            transition: width 0.3s ease, background-color 0.3s ease;
+        }
+
+        .strength-weak { background-color: #dc3545; }
+        .strength-medium { background-color: #ffc107; }
+        .strength-strong { background-color: #28a745; }
     </style>
 </head>
 <body>
@@ -227,7 +271,31 @@
                                 <div class="row mb-4">
                                     <div class="col-md-6">
                                         <label for="hidePassword" class="form-label fw-bold">Password</label>
-                                        <input type="password" class="form-control" id="hidePassword" placeholder="Enter encryption password" required>
+                                        <div class="input-group">
+                                            <input type="password" class="form-control" id="hidePassword" placeholder="Enter password or leave empty for auto-generation">
+                                            <button class="btn btn-outline-secondary" type="button" id="toggleHidePassword" title="Show/Hide Password">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            <button class="btn btn-outline-primary" type="button" id="generateHidePassword" title="Generate Strong Password">
+                                                <i class="fas fa-key"></i> Auto
+                                            </button>
+                                        </div>
+                                        <div id="hidePasswordInfo" class="mt-2" style="display: none;">
+                                            <div class="alert alert-info alert-sm d-flex align-items-center">
+                                                <i class="fas fa-info-circle me-2"></i>
+                                                <div class="flex-grow-1">
+                                                    <strong>Auto-generated password:</strong> 
+                                                    <span id="hidePasswordDisplay" class="font-monospace"></span>
+                                                </div>
+                                                <button class="btn btn-sm btn-outline-primary ms-2" type="button" id="copyHidePassword" title="Copy Password">
+                                                    <i class="fas fa-copy"></i>
+                                                </button>
+                                            </div>
+                                            <small class="text-muted">
+                                                <i class="fas fa-exclamation-triangle"></i> 
+                                                Please save this password! You'll need it to extract the hidden data.
+                                            </small>
+                                        </div>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label fw-bold">Options</label>
@@ -277,7 +345,16 @@
                                 <div class="row mb-4">
                                     <div class="col-md-6">
                                         <label for="extractPassword" class="form-label fw-bold">Password</label>
-                                        <input type="password" class="form-control" id="extractPassword" placeholder="Enter decryption password" required>
+                                        <div class="input-group">
+                                            <input type="password" class="form-control" id="extractPassword" placeholder="Enter the password used for hiding" required>
+                                            <button class="btn btn-outline-secondary" type="button" id="toggleExtractPassword" title="Show/Hide Password">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                        </div>
+                                        <small class="text-muted">
+                                            <i class="fas fa-info-circle"></i>
+                                            Use the exact same password that was used during hiding (including auto-generated passwords)
+                                        </small>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label fw-bold">Options</label>
@@ -475,6 +552,94 @@
             });
         });
 
+        // Password functionality
+        async function generatePassword() {
+            try {
+                const response = await fetch('/api/generate-password');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const passwordField = document.getElementById('hidePassword');
+                    const passwordDisplay = document.getElementById('hidePasswordDisplay');
+                    const passwordInfo = document.getElementById('hidePasswordInfo');
+                    
+                    passwordField.value = data.password;
+                    passwordDisplay.textContent = data.password;
+                    passwordInfo.style.display = 'block';
+                    
+                    // Show a temporary success message
+                    showPasswordMessage('Password generated successfully! Please copy and save it.', 'success');
+                } else {
+                    showPasswordMessage('Failed to generate password: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showPasswordMessage('Error generating password: ' + error.message, 'error');
+            }
+        }
+
+        function showPasswordMessage(message, type) {
+            // Create and show a temporary toast-like message
+            const toast = document.createElement('div');
+            toast.className = `alert alert-${type === 'success' ? 'success' : 'danger'} alert-dismissible fade show position-fixed`;
+            toast.style.top = '20px';
+            toast.style.right = '20px';
+            toast.style.zIndex = '9999';
+            toast.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.body.appendChild(toast);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 5000);
+        }
+
+        function togglePasswordVisibility(inputId, buttonId) {
+            const passwordField = document.getElementById(inputId);
+            const toggleButton = document.getElementById(buttonId);
+            const icon = toggleButton.querySelector('i');
+            
+            if (passwordField.type === 'password') {
+                passwordField.type = 'text';
+                icon.className = 'fas fa-eye-slash';
+            } else {
+                passwordField.type = 'password';
+                icon.className = 'fas fa-eye';
+            }
+        }
+
+        function copyPasswordToClipboard() {
+            const passwordDisplay = document.getElementById('hidePasswordDisplay');
+            const password = passwordDisplay.textContent;
+            
+            navigator.clipboard.writeText(password).then(() => {
+                showPasswordMessage('Password copied to clipboard!', 'success');
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = password;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showPasswordMessage('Password copied to clipboard!', 'success');
+            });
+        }
+
+        // Event listeners for password functionality
+        document.getElementById('generateHidePassword').addEventListener('click', generatePassword);
+        document.getElementById('toggleHidePassword').addEventListener('click', () => {
+            togglePasswordVisibility('hidePassword', 'toggleHidePassword');
+        });
+        document.getElementById('toggleExtractPassword').addEventListener('click', () => {
+            togglePasswordVisibility('extractPassword', 'toggleExtractPassword');
+        });
+        document.getElementById('copyHidePassword').addEventListener('click', copyPasswordToClipboard);
+
         // Job status polling
         function pollJobStatus(jobId, statusElementId) {
             const poll = () => {
@@ -524,7 +689,7 @@
             const containerFile = document.getElementById('containerFile').files[0];
             const secretFile = document.getElementById('secretFile').files[0];
             const secretText = document.getElementById('secretText').value;
-            const password = document.getElementById('hidePassword').value;
+            let password = document.getElementById('hidePassword').value;
             const enhanced = document.getElementById('enhancedMode').checked;
             const dataType = document.querySelector('input[name="dataType"]:checked').value;
 
@@ -541,6 +706,33 @@
             if (dataType === 'file' && !secretFile) {
                 alert('Please select a file to hide');
                 return;
+            }
+
+            // Auto-generate password if none provided
+            if (!password.trim()) {
+                try {
+                    const passwordResponse = await fetch('/api/generate-password');
+                    const passwordData = await passwordResponse.json();
+                    
+                    if (passwordData.success) {
+                        password = passwordData.password;
+                        const passwordField = document.getElementById('hidePassword');
+                        const passwordDisplay = document.getElementById('hidePasswordDisplay');
+                        const passwordInfo = document.getElementById('hidePasswordInfo');
+                        
+                        passwordField.value = password;
+                        passwordDisplay.textContent = password;
+                        passwordInfo.style.display = 'block';
+                        
+                        showPasswordMessage('Auto-generated password for this operation. Please copy and save it!', 'success');
+                    } else {
+                        alert('Failed to generate password. Please enter a password manually.');
+                        return;
+                    }
+                } catch (error) {
+                    alert('Error generating password. Please enter a password manually.');
+                    return;
+                }
             }
 
             const formData = new FormData();

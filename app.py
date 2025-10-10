@@ -7,6 +7,8 @@ import os
 import tempfile
 import uuid
 import time
+import secrets
+import string
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import json
@@ -24,6 +26,21 @@ try:
     from final_video_steganography import FinalVideoSteganographyManager
 except ImportError:
     FinalVideoSteganographyManager = None
+
+try:
+    from enhanced_web_video_stego import EnhancedWebVideoSteganographyManager
+except ImportError:
+    EnhancedWebVideoSteganographyManager = None
+
+try:
+    from enhanced_web_image_stego import EnhancedWebImageSteganographyManager
+except ImportError:
+    EnhancedWebImageSteganographyManager = None
+
+try:
+    from enhanced_web_document_stego import EnhancedWebDocumentSteganographyManager
+except ImportError:
+    EnhancedWebDocumentSteganographyManager = None
 
 try:
     from video_steganography import VideoSteganographyManager
@@ -44,6 +61,11 @@ try:
     from universal_text_audio_stego import UniversalTextAudioSteganographyManager
 except ImportError:
     UniversalTextAudioSteganographyManager = None
+
+try:
+    from enhanced_web_audio_stego import EnhancedWebAudioSteganographyManager
+except ImportError:
+    EnhancedWebAudioSteganographyManager = None
 
 try:
     from reliable_audio_stego import ReliableAudioSteganographyManager
@@ -70,6 +92,32 @@ try:
 except ImportError:
     SimpleAudioSteganographyManager = None
 
+# Import file naming utilities
+try:
+    from file_naming_utils import (
+        create_output_filename, 
+        create_extracted_filename, 
+        sanitize_filename,
+        get_file_type_from_extension,
+        create_job_based_filename
+    )
+except ImportError:
+    # Fallback functions if file naming utils are not available
+    def create_output_filename(container_filename, operation="hidden", method=""):
+        return f"{Path(container_filename).stem}_stego{Path(container_filename).suffix}"
+    
+    def create_extracted_filename(original_filename, data_type="file", file_extension=None):
+        return original_filename or "extracted_content.txt"
+    
+    def sanitize_filename(filename):
+        return filename.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    
+    def get_file_type_from_extension(filename):
+        return "other"
+    
+    def create_job_based_filename(job_id, base_filename, operation):
+        return f"{job_id}_{operation}_{base_filename}"
+
 # Create dummy classes for missing modules to prevent import errors
 class DummySteganographyManager:
     def __init__(self, *args, **kwargs):
@@ -86,44 +134,61 @@ SteganographyManagerEnhanced = DummySteganographyManager
 SimpleSteganographyManager = DummySteganographyManager
 FastVideoSteganographyManager = DummySteganographyManager
 
-# Use real video steganography if available
-try:
-    from final_web_video_text_stego import FinalWebVideoTextSteganographyManager
-    RobustVideoSteganographyManager = FinalWebVideoTextSteganographyManager
-    print("✅ Using FinalWebVideoTextSteganographyManager")
-except ImportError:
+# Use enhanced image steganography if available
+if EnhancedWebImageSteganographyManager is not None:
+    SimpleSteganographyManager = EnhancedWebImageSteganographyManager
+    print("✅ Using EnhancedWebImageSteganographyManager - supports both text and file content!")
+
+# Use enhanced document steganography if available
+if EnhancedWebDocumentSteganographyManager is not None:
+    SteganographyManagerEnhanced = EnhancedWebDocumentSteganographyManager
+    print("✅ Using EnhancedWebDocumentSteganographyManager - supports both text and file content!")
+
+# Use real video steganography if available - prioritize EnhancedWebVideoSteganographyManager
+if EnhancedWebVideoSteganographyManager is not None:
+    RobustVideoSteganographyManager = EnhancedWebVideoSteganographyManager
+    print("✅ Using EnhancedWebVideoSteganographyManager - supports both text and file content!")
+else:
     try:
-        from reliable_web_video_text_stego import ReliableWebVideoTextSteganographyManager
-        RobustVideoSteganographyManager = ReliableWebVideoTextSteganographyManager
-        print("✅ Using ReliableWebVideoTextSteganographyManager")
+        from final_web_video_text_stego import FinalWebVideoTextSteganographyManager
+        RobustVideoSteganographyManager = FinalWebVideoTextSteganographyManager
+        print("✅ Using FinalWebVideoTextSteganographyManager (text only)")
     except ImportError:
         try:
-            from robust_web_video_text_stego import RobustWebVideoTextSteganographyManager
-            RobustVideoSteganographyManager = RobustWebVideoTextSteganographyManager
-            print("✅ Using RobustWebVideoTextSteganographyManager")
+            from reliable_web_video_text_stego import ReliableWebVideoTextSteganographyManager
+            RobustVideoSteganographyManager = ReliableWebVideoTextSteganographyManager
+            print("✅ Using ReliableWebVideoTextSteganographyManager")
         except ImportError:
             try:
-                from working_video_text_stego import WorkingVideoTextSteganographyManager
-                RobustVideoSteganographyManager = WorkingVideoTextSteganographyManager
-                print("✅ Using WorkingVideoTextSteganographyManager")
+                from robust_web_video_text_stego import RobustWebVideoTextSteganographyManager
+                RobustVideoSteganographyManager = RobustWebVideoTextSteganographyManager
+                print("✅ Using RobustWebVideoTextSteganographyManager")
             except ImportError:
                 try:
-                    from web_video_text_stego import WebVideoTextSteganographyManager
-                    RobustVideoSteganographyManager = WebVideoTextSteganographyManager
-                    print("✅ Using WebVideoTextSteganographyManager")
+                    from working_video_text_stego import WorkingVideoTextSteganographyManager
+                    RobustVideoSteganographyManager = WorkingVideoTextSteganographyManager
+                    print("✅ Using WorkingVideoTextSteganographyManager")
                 except ImportError:
-                    if VideoSteganographyManager is not None:
-                        RobustVideoSteganographyManager = VideoSteganographyManager
-                        print("✅ Using VideoSteganographyManager")
-                    elif FinalVideoSteganographyManager is not None:
-                        RobustVideoSteganographyManager = FinalVideoSteganographyManager
-                        print("✅ Using FinalVideoSteganographyManager")
-                    else:
-                        RobustVideoSteganographyManager = DummySteganographyManager
-                        print("⚠️ Using DummySteganographyManager - no video steganography available")
+                    try:
+                        from web_video_text_stego import WebVideoTextSteganographyManager
+                        RobustVideoSteganographyManager = WebVideoTextSteganographyManager
+                        print("✅ Using WebVideoTextSteganographyManager")
+                    except ImportError:
+                        if VideoSteganographyManager is not None:
+                            RobustVideoSteganographyManager = VideoSteganographyManager
+                            print("✅ Using VideoSteganographyManager")
+                        elif FinalVideoSteganographyManager is not None:
+                            RobustVideoSteganographyManager = FinalVideoSteganographyManager
+                            print("✅ Using FinalVideoSteganographyManager")
+                        else:
+                            RobustVideoSteganographyManager = DummySteganographyManager
+                            print("⚠️ Using DummySteganographyManager - no video steganography available")
 
-# Use real classes for audio if available, otherwise use dummy
-if UniversalTextAudioSteganographyManager is None:
+# Use real classes for audio if available, otherwise use dummy - prioritize EnhancedWebAudioSteganographyManager
+if EnhancedWebAudioSteganographyManager is not None:
+    UniversalTextAudioSteganographyManager = EnhancedWebAudioSteganographyManager
+    print("✅ Using EnhancedWebAudioSteganographyManager - supports both text and file content!")
+elif UniversalTextAudioSteganographyManager is None:
     UniversalTextAudioSteganographyManager = DummySteganographyManager
 if ReliableAudioSteganographyManager is None:
     ReliableAudioSteganographyManager = DummySteganographyManager
@@ -207,6 +272,46 @@ async def get_supported_formats():
         "document": ["pdf", "docx", "xml"],
         "text": ["txt", "py", "js", "html", "css", "json"]
     }
+
+def generate_strong_password(length: int = 16) -> str:
+    """Generate a strong, cryptographically secure password"""
+    # Use a mix of uppercase, lowercase, digits, and special characters
+    characters = string.ascii_letters + string.digits + "!@#$%^&*()_+-=[]{}|;:,.<>?"
+    
+    # Ensure at least one character from each category
+    password = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase), 
+        secrets.choice(string.digits),
+        secrets.choice("!@#$%^&*")
+    ]
+    
+    # Fill the rest with random characters
+    for _ in range(length - 4):
+        password.append(secrets.choice(characters))
+    
+    # Shuffle the password to avoid predictable patterns
+    secrets.SystemRandom().shuffle(password)
+    
+    return ''.join(password)
+
+@app.get("/api/generate-password")
+async def generate_password():
+    """Generate a strong password for steganography"""
+    try:
+        password = generate_strong_password(16)
+        return {
+            "success": True,
+            "password": password,
+            "length": len(password),
+            "strength": "Strong",
+            "message": "Auto-generated secure password. Please copy and save this password for extraction."
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to generate password: {str(e)}"
+        }
 
 @app.post("/api/analyze")
 async def analyze_container(
@@ -412,8 +517,13 @@ async def process_hide_job(
             payload = request_obj.data
             is_file = False
         
-        # Output path
-        output_path = OUTPUT_DIR / f"{job_id}_output_{container_filename}"
+        # Output path with improved naming
+        file_type = get_file_type_from_extension(container_filename)
+        improved_output_filename = create_output_filename(container_filename, "stego", file_type)
+        output_path = OUTPUT_DIR / f"{job_id[:8]}_{improved_output_filename}"
+        
+        print(f"[DEBUG] Improved output filename: {improved_output_filename}")
+        print(f"[DEBUG] Full output path: {output_path}")
         
         # Simple file type detection from filename for reliability
         file_ext = container_filename.lower().split('.')[-1] if '.' in container_filename else ''
@@ -537,6 +647,21 @@ async def process_hide_job(
                 jobs[job_id].error = str(e)
                 return
                 
+        elif file_ext in ['pdf', 'docx', 'doc', 'txt', 'rtf', 'odt', 'md', 'rst']:
+            # Use Enhanced Document Steganography for documents
+            print(f"[DEBUG] Using Enhanced Document Steganography for: {file_ext}")
+            
+            try:
+                document_manager = SteganographyManagerEnhanced(request_obj.password)
+                
+                result_dict = document_manager.hide_data(str(container_path), payload, str(output_path), is_file)
+                print(f"[DEBUG] Document hide operation completed: {result_dict}")
+            except Exception as e:
+                print(f"[ERROR] Document steganography failed: {type(e).__name__}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                raise
+                
         else:
             # For non-image, non-audio files, use basic steganography to avoid file handling issues
             print(f"[DEBUG] Using basic steganography for non-image, non-audio file: {file_ext}")
@@ -659,6 +784,28 @@ async def process_extract_job(
                 jobs[job_id].error = str(e)
                 return
         
+        elif file_ext in ['pdf', 'docx', 'doc', 'txt', 'rtf', 'odt', 'md', 'rst']:
+            # Use Enhanced Document Steganography for extraction
+            print(f"[DEBUG] Using Enhanced Document Steganography extraction for: {file_ext}")
+            
+            try:
+                document_manager = SteganographyManagerEnhanced(request_obj.password)
+                extracted_data, filename = document_manager.extract_data(str(container_path))
+                result_dict = {
+                    "success": True,
+                    "data_size": len(extracted_data),
+                    "filename": filename,
+                    "method": "Enhanced Document Steganography"
+                }
+                print(f"[DEBUG] Document extraction completed: {result_dict}")
+            except Exception as e:
+                error_msg = f"Document extraction failed: {str(e)}. Please ensure the document contains hidden data created with this system."
+                print(f"[ERROR] {error_msg}")
+                jobs[job_id].status = "failed"
+                jobs[job_id].message = error_msg
+                jobs[job_id].error = str(e)
+                return
+        
         elif request_obj.is_enhanced:
             # Use enhanced manager for non-images, non-audio
             manager = SteganographyManagerEnhanced(request_obj.password)
@@ -694,13 +841,18 @@ async def process_extract_job(
                 "filename": filename
             }
         
-        # Save extracted data with proper filename and extension
+        # Save extracted data with improved filename
         if filename and filename != "embedded_text.txt":
             # Use the original filename with extension
-            output_path = OUTPUT_DIR / f"{job_id}_extracted_{filename}"
+            improved_extracted_filename = create_extracted_filename(filename, "file")
         else:
-            # Default to .txt for text data
-            output_path = OUTPUT_DIR / f"{job_id}_extracted_data.txt"
+            # Default meaningful name for text data
+            improved_extracted_filename = create_extracted_filename(None, "text")
+            
+        output_path = OUTPUT_DIR / f"{job_id[:8]}_{improved_extracted_filename}"
+        
+        print(f"[DEBUG] Improved extracted filename: {improved_extracted_filename}")
+        print(f"[DEBUG] Full extracted output path: {output_path}")
         
         with open(output_path, "wb") as f:
             f.write(extracted_data)
