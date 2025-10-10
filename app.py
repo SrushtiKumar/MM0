@@ -201,6 +201,36 @@ if WorkingAudioSteganographyManager is None:
 if FinalAudioSteganographyManager is None:
     FinalAudioSteganographyManager = DummySteganographyManager
 
+# Utility functions for user-friendly file naming
+def generate_user_friendly_name(operation_type: str, container_name: str, payload_name: str = None) -> str:
+    """
+    Generate user-friendly download filenames based on operation type and original filenames.
+    
+    Args:
+        operation_type: "hide" or "extract"
+        container_name: Original name of the carrier/container file
+        payload_name: Original name of the payload file (for extract operations)
+    
+    Returns:
+        User-friendly filename for download
+    """
+    if operation_type == "hide":
+        # For hide operations: use container name with suffix
+        container_stem = Path(container_name).stem
+        container_ext = Path(container_name).suffix
+        return f"{container_stem}_with_hidden_data{container_ext}"
+    
+    elif operation_type == "extract":
+        # For extract operations: prefer original payload name if available
+        if payload_name and payload_name != "unknown":
+            return payload_name
+        else:
+            # Fallback to generic name if original payload name unknown
+            return "extracted_file"
+    
+    # Fallback
+    return container_name
+
 # Configuration
 UPLOAD_DIR = Path("uploads")
 OUTPUT_DIR = Path("outputs")
@@ -241,6 +271,11 @@ class JobStatus(BaseModel):
     result: Optional[Dict[str, Any]] = None
     download_url: Optional[str] = None
     error: Optional[str] = None
+    # New fields for better download naming
+    operation_type: Optional[str] = None  # "hide" or "extract"
+    original_container_name: Optional[str] = None  # Name of carrier file
+    original_payload_name: Optional[str] = None  # Name of hidden file (for extract operations)
+    user_friendly_name: Optional[str] = None  # Computed user-friendly download name
 
 # In-memory job storage (in production, use Redis or database)
 jobs: Dict[str, JobStatus] = {}
@@ -474,9 +509,14 @@ async def download_result(job_id: str):
         raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
     
     print(f"[DEBUG] File found at: {file_path}")
+    
+    # Use user-friendly filename if available, otherwise fall back to original filename
+    download_filename = job.user_friendly_name if job.user_friendly_name else file_path.name
+    print(f"[DEBUG] Serving file with name: {download_filename}")
+    
     return FileResponse(
         path=str(file_path),
-        filename=file_path.name,
+        filename=download_filename,
         media_type='application/octet-stream'
     )
 
@@ -682,6 +722,11 @@ async def process_hide_job(
         jobs[job_id].result = result_dict
         jobs[job_id].download_url = output_path.name  # Store just the filename
         
+        # Set filename metadata for user-friendly downloads
+        jobs[job_id].operation_type = "hide"
+        jobs[job_id].original_container_name = container_filename
+        jobs[job_id].user_friendly_name = generate_user_friendly_name("hide", container_filename)
+        
         # Clean up input files
         container_path.unlink()
         if secret_content is not None and secret_path.exists():
@@ -861,6 +906,14 @@ async def process_extract_job(
         jobs[job_id].message = "Extract operation completed successfully"
         jobs[job_id].result = result_dict
         jobs[job_id].download_url = output_path.name  # Store just the filename
+        
+        # Set filename metadata for user-friendly downloads
+        jobs[job_id].operation_type = "extract"
+        jobs[job_id].original_container_name = container_filename
+        # Use the extracted filename if available, otherwise use generic name
+        original_payload_name = result_dict.get('filename', 'unknown')
+        jobs[job_id].original_payload_name = original_payload_name
+        jobs[job_id].user_friendly_name = generate_user_friendly_name("extract", container_filename, original_payload_name)
         
         # Clean up input file
         container_path.unlink()
