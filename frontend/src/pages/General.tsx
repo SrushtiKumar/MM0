@@ -24,6 +24,9 @@ import {
   CheckCircle,
   Shield,
   Eye,
+  EyeOff,
+  Copy,
+  Save,
   Zap,
   Music,
   Video,
@@ -86,6 +89,17 @@ export default function General() {
   const [saveProject, setSaveProject] = useState(false);
   const [projectTags, setProjectTags] = useState("");
   const [savedProjects, setSavedProjects] = useState<any[]>([]);
+  
+  // Password Management State
+  const [showPassword, setShowPassword] = useState(false);
+  const [savePasswordWithProject, setSavePasswordWithProject] = useState(false);
+  const [savedPassword, setSavedPassword] = useState("");
+  
+  // Size Estimate State
+  const [estimateFile, setEstimateFile] = useState<File | null>(null);
+  const [estimateType, setEstimateType] = useState<"carrier" | "content">("carrier");
+  const [estimateResult, setEstimateResult] = useState<any>(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -239,6 +253,52 @@ export default function General() {
       }
       setPassword(result);
       toast.success('Generated strong password (local fallback)');
+    }
+  };
+
+  // Password Management Functions
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
+  const copyPasswordToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(password);
+      toast.success("Password copied to clipboard!");
+    } catch (error) {
+      console.error("Failed to copy password:", error);
+      // Fallback for older browsers
+      const textArea = document.createElement("textarea");
+      textArea.value = password;
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        toast.success("Password copied to clipboard!");
+      } catch (fallbackError) {
+        toast.error("Failed to copy password");
+      }
+      document.body.removeChild(textArea);
+    }
+  };
+
+  const savePasswordWithProjectSettings = () => {
+    if (savePasswordWithProject && password.trim()) {
+      setSavedPassword(password);
+      toast.success("Password saved with project settings!");
+    } else if (!savePasswordWithProject) {
+      setSavedPassword("");
+      toast.success("Password removed from project settings!");
+    }
+  };
+
+  const loadSavedPassword = () => {
+    if (savedPassword) {
+      setPassword(savedPassword);
+      toast.success("Loaded saved password from project!");
+    } else {
+      toast.error("No saved password found in project settings");
     }
   };
 
@@ -492,6 +552,104 @@ export default function General() {
     }
   };
 
+  // Size Estimation Functions
+  const handleEstimateFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setEstimateFile(file);
+      setEstimateResult(null);
+    }
+  };
+
+  const calculateSizeEstimate = async () => {
+    if (!estimateFile) {
+      toast.error("Please select a file first");
+      return;
+    }
+
+    setEstimateLoading(true);
+    setEstimateResult(null);
+
+    try {
+      const fileSizeBytes = estimateFile.size;
+      const fileSizeKB = fileSizeBytes / 1024;
+      const fileSizeMB = fileSizeKB / 1024;
+
+      if (estimateType === "carrier") {
+        // Calculate how much data can be embedded in this carrier file
+        const fileExt = estimateFile.name.split('.').pop()?.toLowerCase() || '';
+        let capacityBytes = 0;
+        let estimatedCapacity = "";
+
+        // Audio capacity calculation (based on our audio capacity manager)
+        if (['wav', 'mp3', 'flac', 'ogg', 'aac', 'm4a'].includes(fileExt)) {
+          // Approximate: 1 bit per sample for LSB steganography
+          // For audio files, estimate based on duration and sample rate
+          const estimatedSamples = fileSizeBytes * 0.5; // Rough estimate
+          capacityBytes = Math.floor(estimatedSamples * 0.8 / 8); // 80% safety factor
+          estimatedCapacity = "audio steganography";
+        }
+        // Image capacity calculation
+        else if (['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'gif'].includes(fileExt)) {
+          // Rough estimate: 1 bit per pixel for LSB
+          const estimatedPixels = fileSizeBytes * 0.1; // Very rough estimate
+          capacityBytes = Math.floor(estimatedPixels / 8);
+          estimatedCapacity = "image steganography";
+        }
+        // Video capacity calculation
+        else if (['mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv'].includes(fileExt)) {
+          // Video has higher capacity
+          capacityBytes = Math.floor(fileSizeBytes * 0.01); // 1% of video size
+          estimatedCapacity = "video steganography";
+        }
+        // Document capacity calculation
+        else if (['pdf', 'docx', 'txt', 'rtf'].includes(fileExt)) {
+          // Document steganography has variable capacity
+          capacityBytes = Math.floor(fileSizeBytes * 0.1); // 10% of document size
+          estimatedCapacity = "document steganography";
+        }
+
+        setEstimateResult({
+          type: "carrier",
+          fileSize: fileSizeBytes,
+          fileSizeFormatted: fileSizeBytes > 1024 * 1024 ? `${fileSizeMB.toFixed(2)} MB` : `${fileSizeKB.toFixed(2)} KB`,
+          capacity: capacityBytes,
+          capacityFormatted: capacityBytes > 1024 ? `${(capacityBytes / 1024).toFixed(2)} KB` : `${capacityBytes} bytes`,
+          method: estimatedCapacity,
+          recommendations: [
+            `This ${fileExt.toUpperCase()} file can hide approximately ${capacityBytes > 1024 ? `${(capacityBytes / 1024).toFixed(2)} KB` : `${capacityBytes} bytes`} of data`,
+            capacityBytes > 10000 ? "✅ Good capacity for most files" : capacityBytes > 1000 ? "⚠️ Moderate capacity - suitable for small files" : "❌ Limited capacity - only text messages recommended"
+          ]
+        });
+      } else {
+        // Calculate what size carrier file is needed for this content
+        const overhead = fileSizeBytes * 1.5; // Account for encryption and encoding overhead
+        const recommendedCarrierSize = overhead * 10; // 10x for safety margin
+
+        const audioCarrierDuration = Math.ceil(overhead / 3000); // ~3KB per second for audio
+        const imageCarrierPixels = overhead * 8; // 8 bits per pixel
+        const videoCarrierSize = overhead * 100; // Video can hide more efficiently
+
+        setEstimateResult({
+          type: "content",
+          fileSize: fileSizeBytes,
+          fileSizeFormatted: fileSizeBytes > 1024 * 1024 ? `${fileSizeMB.toFixed(2)} MB` : `${fileSizeKB.toFixed(2)} KB`,
+          recommendations: [
+            `For audio carriers: Use ${audioCarrierDuration}+ second audio files`,
+            `For image carriers: Use images with ${Math.ceil(Math.sqrt(imageCarrierPixels))}x${Math.ceil(Math.sqrt(imageCarrierPixels))}+ pixels`,
+            `For video carriers: Use ${((videoCarrierSize / 1024 / 1024)).toFixed(1)}+ MB video files`,
+            fileSizeBytes > 100000 ? "💡 Large file - consider using video carriers for best results" : "💡 Small file - any carrier type should work"
+          ]
+        });
+      }
+    } catch (error) {
+      console.error("Size estimation error:", error);
+      toast.error("Failed to calculate size estimate");
+    } finally {
+      setEstimateLoading(false);
+    }
+  };
+
   const getContentIcon = () => {
     switch (contentType) {
       case "text": return <FileText className="h-4 w-4" />;
@@ -555,9 +713,11 @@ export default function General() {
         <section className="py-8">
           <div className="container">
             <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="embed">Embed Data</TabsTrigger>
                 <TabsTrigger value="extract">Extract Data</TabsTrigger>
+                <TabsTrigger value="project-settings">Project Settings</TabsTrigger>
+                <TabsTrigger value="size-estimate">Size Estimate</TabsTrigger>
               </TabsList>
               
               <TabsContent value="embed" className="space-y-6">
@@ -705,68 +865,90 @@ export default function General() {
                         </div>
                       )}
 
-                      {/* Project Settings */}
-                      <div className="space-y-4 p-4 border rounded-lg bg-muted/50">
-                        <h4 className="text-sm font-semibold flex items-center gap-2">
-                          <File className="h-4 w-4" />
-                          Project Settings (Optional)
-                        </h4>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="project-name">Project Name</Label>
-                          <Input
-                            id="project-name"
-                            value={projectName}
-                            onChange={(e) => setProjectName(e.target.value)}
-                            placeholder="e.g., Secret Mission Files"
-                            className="text-sm"
-                          />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="project-description">Project Description</Label>
-                          <Textarea
-                            id="project-description"
-                            value={projectDescription}
-                            onChange={(e) => setProjectDescription(e.target.value)}
-                            placeholder="Brief description of this steganography project..."
-                            rows={2}
-                            className="text-sm"
-                          />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="project-tags">Tags (comma-separated)</Label>
-                          <Input
-                            id="project-tags"
-                            value={projectTags}
-                            onChange={(e) => setProjectTags(e.target.value)}
-                            placeholder="secret, mission, confidential"
-                            className="text-sm"
-                          />
-                        </div>
-                      </div>
-
                       {/* Password */}
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         <Label htmlFor="password">Encryption Password</Label>
+                        
+                        {/* Password Input Row */}
                         <div className="flex gap-2">
-                          <Input
-                            id="password"
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="Enter strong password"
-                            className="flex-1"
-                          />
+                          <div className="relative flex-1">
+                            <Input
+                              id="password"
+                              type={showPassword ? "text" : "password"}
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                              placeholder="Enter strong password"
+                              className="pr-10"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={togglePasswordVisibility}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-muted"
+                            >
+                              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                          </div>
                           <Button
                             type="button"
                             variant="outline"
                             onClick={generatePassword}
                             className="shrink-0"
+                            title="Generate Password"
                           >
                             <Key className="h-4 w-4" />
                           </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={copyPasswordToClipboard}
+                            className="shrink-0"
+                            disabled={!password.trim()}
+                            title="Copy Password"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        
+                        {/* Password Management Options */}
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="save-password-with-project"
+                              checked={savePasswordWithProject}
+                              onChange={(e) => {
+                                setSavePasswordWithProject(e.target.checked);
+                                if (e.target.checked && password.trim()) {
+                                  setSavedPassword(password);
+                                  toast.success("Password will be saved with project!");
+                                } else if (!e.target.checked) {
+                                  setSavedPassword("");
+                                }
+                              }}
+                              className="rounded"
+                            />
+                            <Label htmlFor="save-password-with-project" className="text-sm">
+                              Save password with project settings
+                            </Label>
+                          </div>
+                          
+                          {savedPassword && (
+                            <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                              <Shield className="h-4 w-4 text-green-600" />
+                              <span className="text-sm text-muted-foreground">Password saved with project</span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={loadSavedPassword}
+                                className="ml-auto h-6 px-2 text-xs"
+                              >
+                                Load
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -916,15 +1098,58 @@ export default function General() {
                       </div>
 
                       {/* Password */}
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         <Label htmlFor="extract-password">Decryption Password</Label>
-                        <Input
-                          id="extract-password"
-                          type="password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="Enter password to decrypt"
-                        />
+                        
+                        {/* Password Input Row */}
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <Input
+                              id="extract-password"
+                              type={showPassword ? "text" : "password"}
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                              placeholder="Enter password to decrypt"
+                              className="pr-10"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={togglePasswordVisibility}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-muted"
+                            >
+                              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={copyPasswordToClipboard}
+                            className="shrink-0"
+                            disabled={!password.trim()}
+                            title="Copy Password"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        
+                        {/* Load Saved Password Option */}
+                        {savedPassword && (
+                          <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                            <Shield className="h-4 w-4 text-green-600" />
+                            <span className="text-sm text-muted-foreground">Use saved project password</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={loadSavedPassword}
+                              className="ml-auto h-6 px-2 text-xs"
+                            >
+                              Load
+                            </Button>
+                          </div>
+                        )}
                       </div>
 
                       <Button 
@@ -1007,6 +1232,383 @@ export default function General() {
                     </CardContent>
                   </Card>
                 </div>
+              </TabsContent>
+              
+              {/* Project Settings Tab */}
+              <TabsContent value="project-settings" className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <File className="h-5 w-5" />
+                      Project Settings
+                    </CardTitle>
+                    <CardDescription>
+                      Configure project information and manage your steganography projects
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                      {/* Project Information */}
+                      <div className="space-y-6">
+                        <h3 className="text-lg font-semibold">Project Information</h3>
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="project-name-tab">Project Name</Label>
+                          <Input
+                            id="project-name-tab"
+                            value={projectName}
+                            onChange={(e) => setProjectName(e.target.value)}
+                            placeholder="e.g., Secret Mission Files"
+                          />
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="project-description-tab">Project Description</Label>
+                          <Textarea
+                            id="project-description-tab"
+                            value={projectDescription}
+                            onChange={(e) => setProjectDescription(e.target.value)}
+                            placeholder="Brief description of this steganography project..."
+                            rows={3}
+                          />
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="project-tags-tab">Tags (comma-separated)</Label>
+                          <Input
+                            id="project-tags-tab"
+                            value={projectTags}
+                            onChange={(e) => setProjectTags(e.target.value)}
+                            placeholder="secret, mission, confidential"
+                          />
+                        </div>
+                        
+                        {/* Password Management Section */}
+                        <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                          <h4 className="text-sm font-semibold flex items-center gap-2">
+                            <Shield className="h-4 w-4" />
+                            Password Management
+                          </h4>
+                          
+                          <div className="space-y-3">
+                            <div className="space-y-2">
+                              <Label htmlFor="project-password">Project Password</Label>
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <Input
+                                    id="project-password"
+                                    type={showPassword ? "text" : "password"}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Enter or generate password"
+                                    className="pr-10"
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={togglePasswordVisibility}
+                                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-muted"
+                                  >
+                                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                  </Button>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={generatePassword}
+                                  className="shrink-0"
+                                  title="Generate Password"
+                                >
+                                  <Key className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={copyPasswordToClipboard}
+                                  className="shrink-0"
+                                  disabled={!password.trim()}
+                                  title="Copy Password"
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                id="save-password-project-tab"
+                                checked={savePasswordWithProject}
+                                onChange={(e) => {
+                                  setSavePasswordWithProject(e.target.checked);
+                                  savePasswordWithProjectSettings();
+                                }}
+                                className="rounded"
+                              />
+                              <Label htmlFor="save-password-project-tab" className="text-sm">
+                                Save password with this project
+                              </Label>
+                            </div>
+                            
+                            {savedPassword && (
+                              <div className="p-2 bg-green-50 border border-green-200 rounded-lg">
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle className="h-4 w-4 text-green-600" />
+                                  <span className="text-sm text-green-700">
+                                    Password saved with project ({savedPassword.length} characters)
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id="save-project"
+                            checked={saveProject}
+                            onChange={(e) => setSaveProject(e.target.checked)}
+                            className="rounded"
+                          />
+                          <Label htmlFor="save-project">Save project for future use</Label>
+                        </div>
+                      </div>
+                      
+                      {/* Project Preview */}
+                      <div className="space-y-6">
+                        <h3 className="text-lg font-semibold">Project Preview</h3>
+                        
+                        {projectName ? (
+                          <div className="p-4 bg-muted rounded-lg space-y-3">
+                            <div className="flex items-center gap-2">
+                              <File className="h-4 w-4" />
+                              <span className="font-medium">{projectName}</span>
+                            </div>
+                            
+                            {projectDescription && (
+                              <p className="text-sm text-muted-foreground">
+                                {projectDescription}
+                              </p>
+                            )}
+                            
+                            {projectTags && (
+                              <div className="flex flex-wrap gap-1">
+                                {projectTags.split(',').map((tag, index) => (
+                                  <Badge key={index} variant="secondary" className="text-xs">
+                                    {tag.trim()}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                            
+                            {/* Password Status */}
+                            {savedPassword && (
+                              <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded">
+                                <Shield className="h-4 w-4 text-green-600" />
+                                <span className="text-xs text-green-700">
+                                  Password saved ({savedPassword.length} chars)
+                                </span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={copyPasswordToClipboard}
+                                  className="ml-auto h-6 w-6 p-0"
+                                  title="Copy Password"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            )}
+                            
+                            <div className="text-xs text-muted-foreground">
+                              Created: {new Date().toLocaleDateString()}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-8 text-center text-muted-foreground border-2 border-dashed rounded-lg">
+                            <File className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                            <p>Enter project information to see preview</p>
+                          </div>
+                        )}
+                        
+                        {/* Project Actions */}
+                        <div className="space-y-2">
+                          <Button 
+                            className="w-full" 
+                            disabled={!projectName.trim()}
+                            onClick={() => toast.success("Project settings saved!")}
+                          >
+                            Save Project Settings
+                          </Button>
+                          
+                          <Button 
+                            variant="outline" 
+                            className="w-full"
+                            onClick={() => {
+                              setProjectName("");
+                              setProjectDescription("");
+                              setProjectTags("");
+                              setSaveProject(false);
+                              setSavePasswordWithProject(false);
+                              setSavedPassword("");
+                              setPassword("");
+                              toast.success("Project settings and password cleared!");
+                            }}
+                          >
+                            Clear Settings
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              
+              {/* Size Estimate Tab */}
+              <TabsContent value="size-estimate" className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <RefreshCw className="h-5 w-5" />
+                      Size Estimate Calculator
+                    </CardTitle>
+                    <CardDescription>
+                      Calculate file capacity requirements and size recommendations
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                      {/* Input Section */}
+                      <div className="space-y-6">
+                        <div className="space-y-4">
+                          <Label>Estimation Type</Label>
+                          <Select value={estimateType} onValueChange={(value: "carrier" | "content") => setEstimateType(value)}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="carrier">
+                                <div className="flex items-center gap-2">
+                                  <FileImage className="h-4 w-4" />
+                                  Carrier File Capacity
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="content">
+                                <div className="flex items-center gap-2">
+                                  <File className="h-4 w-4" />
+                                  Content File Requirements
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-sm text-muted-foreground">
+                            {estimateType === "carrier" 
+                              ? "Upload a carrier file to see how much data it can hide"
+                              : "Upload a content file to see what carrier size is needed"
+                            }
+                          </p>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="estimate-file">
+                            {estimateType === "carrier" ? "Carrier File" : "Content File"}
+                          </Label>
+                          <div className="border-2 border-dashed border-border rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
+                            <input
+                              id="estimate-file"
+                              type="file"
+                              onChange={handleEstimateFileChange}
+                              className="hidden"
+                              accept={estimateType === "carrier" 
+                                ? "image/*,video/*,audio/*,.wav,.mp3,.flac,.ogg,.aac,.m4a,.pdf,.docx,.txt,.rtf"
+                                : "*/*"
+                              }
+                            />
+                            <label htmlFor="estimate-file" className="cursor-pointer">
+                              {estimateType === "carrier" ? <FileImage className="h-6 w-6 text-muted-foreground mx-auto mb-2" /> : <File className="h-6 w-6 text-muted-foreground mx-auto mb-2" />}
+                              <p className="text-sm text-muted-foreground">
+                                {estimateFile ? estimateFile.name : `Click to upload ${estimateType} file`}
+                              </p>
+                              {estimateFile && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Size: {formatFileSize(estimateFile.size)}
+                                </p>
+                              )}
+                            </label>
+                          </div>
+                        </div>
+                        
+                        <Button 
+                          onClick={calculateSizeEstimate}
+                          className="w-full"
+                          disabled={!estimateFile || estimateLoading}
+                        >
+                          {estimateLoading ? (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                              Calculating...
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="h-4 w-4 mr-2" />
+                              Calculate Size Estimate
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      
+                      {/* Results Section */}
+                      <div className="space-y-6">
+                        <h3 className="text-lg font-semibold">Size Analysis Results</h3>
+                        
+                        {estimateResult ? (
+                          <div className="space-y-4">
+                            <div className="p-4 bg-muted rounded-lg space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium">File Size:</span>
+                                <span className="text-sm">{estimateResult.fileSizeFormatted}</span>
+                              </div>
+                              
+                              {estimateResult.type === "carrier" && (
+                                <>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium">Estimated Capacity:</span>
+                                    <span className="text-sm">{estimateResult.capacityFormatted}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium">Method:</span>
+                                    <span className="text-sm capitalize">{estimateResult.method}</span>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                            
+                            <div className="space-y-2">
+                              <Label>Recommendations:</Label>
+                              <div className="space-y-2">
+                                {estimateResult.recommendations.map((rec: string, index: number) => (
+                                  <Alert key={index}>
+                                    <AlertDescription className="text-sm">
+                                      {rec}
+                                    </AlertDescription>
+                                  </Alert>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-8 text-center text-muted-foreground border-2 border-dashed rounded-lg">
+                            <RefreshCw className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                            <p>Upload a file and click calculate to see size analysis</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               </TabsContent>
             </Tabs>
           </div>
