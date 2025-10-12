@@ -11,7 +11,8 @@ OUTPUT_DIR = "outputs"
 TEMP_DIR = "temp"
 
 # File settings
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+# MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB - REMOVED: No file size limit
+MAX_FILE_SIZE = None  # No limit
 ALLOWED_EXTENSIONS = {
     'image': ['.png', '.jpg', '.jpeg', '.bmp'],
     'audio': ['.wav', '.mp3', '.flac'],

@@ -308,6 +308,27 @@ async def get_supported_formats():
         "text": ["txt", "py", "js", "html", "css", "json"]
     }
 
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for frontend"""
+    available_managers = []
+    
+    # Check if manager classes are available (not None and not DummySteganographyManager)
+    if EnhancedWebImageSteganographyManager is not None and EnhancedWebImageSteganographyManager != DummySteganographyManager:
+        available_managers.append("image")
+    if SteganographyManagerEnhanced is not None and SteganographyManagerEnhanced != DummySteganographyManager:
+        available_managers.append("document") 
+    if RobustVideoSteganographyManager is not None and RobustVideoSteganographyManager != DummySteganographyManager:
+        available_managers.append("video")
+    if UniversalTextAudioSteganographyManager is not None and UniversalTextAudioSteganographyManager != DummySteganographyManager:
+        available_managers.append("audio")
+    
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "available_managers": available_managers
+    }
+
 def generate_strong_password(length: int = 16) -> str:
     """Generate a strong, cryptographically secure password"""
     # Use a mix of uppercase, lowercase, digits, and special characters
