@@ -43,26 +43,67 @@ interface SupportedFormats {
   document: { carrier_formats: string[]; content_formats: string[]; max_size_mb: number; };
 }
 
-// Enhanced toast with better UX
+// Enhanced toast with better UX - fixed stacking issue
+let toastCount = 0;
+const activeToasts: HTMLElement[] = [];
+
 const toast = {
   success: (message: string) => {
     console.log('✅ SUCCESS:', message);
-    // You can replace this with a proper toast library later
-    const notification = document.createElement('div');
-    notification.className = 'fixed top-4 right-4 bg-green-500 text-white p-3 rounded-lg shadow-lg z-50';
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    setTimeout(() => document.body.removeChild(notification), 3000);
+    createToast(message, 'bg-green-500', 3000);
   },
   error: (message: string) => {
     console.error('❌ ERROR:', message);
-    const notification = document.createElement('div');
-    notification.className = 'fixed top-4 right-4 bg-red-500 text-white p-3 rounded-lg shadow-lg z-50';
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    setTimeout(() => document.body.removeChild(notification), 5000);
+    createToast(message, 'bg-red-500', 5000);
   }
 };
+
+function createToast(message: string, bgColor: string, duration: number) {
+  const notification = document.createElement('div');
+  const topOffset = 16 + (activeToasts.length * 80); // 16px base + 80px per existing toast
+  
+  notification.className = `fixed right-4 ${bgColor} text-white p-3 rounded-lg shadow-lg z-50 transition-all duration-300 ease-in-out`;
+  notification.style.top = `${topOffset}px`;
+  notification.textContent = message;
+  
+  // Add to active toasts
+  activeToasts.push(notification);
+  document.body.appendChild(notification);
+  
+  // Animate in
+  setTimeout(() => {
+    notification.style.opacity = '1';
+    notification.style.transform = 'translateX(0)';
+  }, 10);
+  
+  // Remove after duration
+  setTimeout(() => {
+    const index = activeToasts.indexOf(notification);
+    if (index > -1) {
+      activeToasts.splice(index, 1);
+      
+      // Animate out
+      notification.style.opacity = '0';
+      notification.style.transform = 'translateX(100%)';
+      
+      setTimeout(() => {
+        if (notification.parentNode) {
+          document.body.removeChild(notification);
+        }
+        
+        // Reposition remaining toasts
+        activeToasts.forEach((toast, i) => {
+          const newTopOffset = 16 + (i * 80);
+          toast.style.top = `${newTopOffset}px`;
+        });
+      }, 300);
+    }
+  }, duration);
+  
+  // Initial state for animation
+  notification.style.opacity = '0';
+  notification.style.transform = 'translateX(100%)';
+}
 
 export default function General() {
   const navigate = useNavigate();
@@ -578,6 +619,7 @@ export default function General() {
     poll();
   };
 
+  // Enhanced download with custom save dialog
   const downloadResult = async () => {
     if (!currentOperationId) {
       toast.error("No operation result to download");
@@ -592,18 +634,101 @@ export default function General() {
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = operationResult?.filename || `result_${Date.now()}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      toast.success("File downloaded successfully!");
+      const defaultFilename = operationResult?.filename || `result_${Date.now()}`;
+      
+      // Try to use the modern File System Access API
+      if ('showSaveFilePicker' in window) {
+        try {
+          // Get the file extension from the default filename
+          const extension = defaultFilename.split('.').pop() || '';
+          const fileTypeMap: { [key: string]: any } = {
+            'mp4': { description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } },
+            'avi': { description: 'AVI Video', accept: { 'video/avi': ['.avi'] } },
+            'wav': { description: 'WAV Audio', accept: { 'audio/wav': ['.wav'] } },
+            'mp3': { description: 'MP3 Audio', accept: { 'audio/mp3': ['.mp3'] } },
+            'jpg': { description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg', '.jpeg'] } },
+            'jpeg': { description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg', '.jpeg'] } },
+            'png': { description: 'PNG Image', accept: { 'image/png': ['.png'] } },
+            'pdf': { description: 'PDF Document', accept: { 'application/pdf': ['.pdf'] } },
+            'doc': { description: 'Word Document', accept: { 'application/msword': ['.doc'] } },
+            'docx': { description: 'Word Document', accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } },
+            'txt': { description: 'Text File', accept: { 'text/plain': ['.txt'] } },
+            'zip': { description: 'ZIP Archive', accept: { 'application/zip': ['.zip'] } }
+          };
+
+          const fileType = fileTypeMap[extension.toLowerCase()] || {
+            description: 'All Files',
+            accept: { '*/*': ['.*'] }
+          };
+
+          // Show the save dialog
+          const fileHandle = await (window as any).showSaveFilePicker({
+            suggestedName: defaultFilename,
+            types: [fileType]
+          });
+
+          // Write the file
+          const writableStream = await fileHandle.createWritable();
+          await writableStream.write(blob);
+          await writableStream.close();
+
+          toast.success(`File saved successfully as "${fileHandle.name}"!`);
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            toast.error("Save operation was cancelled");
+            return;
+          }
+          throw error; // Fall back to traditional download
+        }
+      } else {
+        // Fallback for browsers that don't support File System Access API
+        // Show a custom dialog for filename input
+        const customFilename = prompt(
+          `Enter filename to save as (current: ${defaultFilename}):`,
+          defaultFilename
+        );
+        
+        if (customFilename === null) {
+          toast.error("Download cancelled");
+          return;
+        }
+
+        const finalFilename = customFilename.trim() || defaultFilename;
+        
+        // Traditional download with custom filename
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = finalFilename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        toast.success(`File downloaded as "${finalFilename}"!`);
+      }
     } catch (error: any) {
-      toast.error(error.message || "Failed to download result");
-      console.error("Download error:", error);
+      // Final fallback - traditional download with original filename
+      if (error.message.includes('File System Access API')) {
+        try {
+          const blob = await (await fetch(`${API_BASE_URL}/operations/${currentOperationId}/download`)).blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = operationResult?.filename || `result_${Date.now()}`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          toast.success("File downloaded successfully (fallback mode)!");
+        } catch (fallbackError: any) {
+          toast.error(fallbackError.message || "Failed to download result");
+          console.error("Download fallback error:", fallbackError);
+        }
+      } else {
+        toast.error(error.message || "Failed to download result");
+        console.error("Download error:", error);
+      }
     }
   };
 
@@ -1087,8 +1212,11 @@ export default function General() {
                             disabled={!currentOperationId}
                           >
                             <Download className="h-4 w-4 mr-2" />
-                            Download Result
+                            Save Result As...
                           </Button>
+                          <p className="text-xs text-muted-foreground text-center mt-2">
+                            Choose your preferred filename and save location
+                          </p>
                         </div>
                       )}
 
@@ -1225,7 +1353,7 @@ export default function General() {
                         Extraction Results
                       </CardTitle>
                       <CardDescription>
-                        View extracted content and download results
+                        View extracted content and save to your chosen location
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
@@ -1280,8 +1408,11 @@ export default function General() {
                             disabled={!currentOperationId}
                           >
                             <Download className="h-4 w-4 mr-2" />
-                            Download Extracted Data
+                            Save Extracted Data As...
                           </Button>
+                          <p className="text-xs text-muted-foreground text-center mt-2">
+                            Choose your preferred filename and save location
+                          </p>
                         </div>
                       )}
                     </CardContent>
