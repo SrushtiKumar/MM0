@@ -11,6 +11,8 @@ import time
 import secrets
 import string
 import hashlib
+import zipfile
+import base64
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
 import json
@@ -30,39 +32,39 @@ steganography_managers = {}
 try:
     from enhanced_web_video_stego import EnhancedWebVideoSteganographyManager
     steganography_managers['video'] = EnhancedWebVideoSteganographyManager
-    print("✅ Video steganography module loaded")
+    print("[OK] Video steganography module loaded")
 except ImportError as e:
-    print(f"❌ Video steganography module not available: {e}")
+    print(f"[ERROR] Video steganography module not available: {e}")
     steganography_managers['video'] = None
 
 try:
     from enhanced_web_image_stego import EnhancedWebImageSteganographyManager
     steganography_managers['image'] = EnhancedWebImageSteganographyManager
-    print("✅ Image steganography module loaded")
+    print("[OK] Image steganography module loaded")
 except ImportError as e:
-    print(f"❌ Image steganography module not available: {e}")
+    print(f"[ERROR] Image steganography module not available: {e}")
     steganography_managers['image'] = None
 
 try:
     from enhanced_web_document_stego import EnhancedWebDocumentSteganographyManager
     steganography_managers['document'] = EnhancedWebDocumentSteganographyManager
-    print("✅ Document steganography module loaded")
+    print("[OK] Document steganography module loaded")
 except ImportError as e:
-    print(f"❌ Document steganography module not available: {e}")
+    print(f"[ERROR] Document steganography module not available: {e}")
     steganography_managers['document'] = None
 
 try:
     from safe_enhanced_web_audio_stego import SafeEnhancedWebAudioSteganographyManager
     steganography_managers['audio'] = SafeEnhancedWebAudioSteganographyManager
-    print("✅ Safe Audio steganography module loaded")
+    print("[OK] Safe Audio steganography module loaded")
 except ImportError as e:
-    print(f"❌ Safe Audio steganography module not available: {e}")
+    print(f"[ERROR] Safe Audio steganography module not available: {e}")
     try:
         from enhanced_web_audio_stego import EnhancedWebAudioSteganographyManager
         steganography_managers['audio'] = EnhancedWebAudioSteganographyManager
-        print("✅ Fallback Audio steganography module loaded")
+        print("[OK] Fallback Audio steganography module loaded")
     except ImportError as e2:
-        print(f"❌ Audio steganography module not available: {e2}")
+        print(f"[ERROR] Audio steganography module not available: {e2}")
         steganography_managers['audio'] = None
 
 # Import Supabase service with fallback
@@ -70,7 +72,7 @@ database_available = False
 try:
     from supabase_service import get_database, SteganographyDatabase
     database_available = True
-    print("✅ Supabase database service loaded")
+    print("[OK] Supabase database service loaded")
 except ImportError as e:
     print(f"❌ Supabase database service not available: {e}")
     get_database = None
@@ -106,6 +108,7 @@ class OperationResponse(BaseModel):
     success: bool
     operation_id: str
     message: str
+    output_filename: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
     download_url: Optional[str] = None
 
@@ -211,6 +214,253 @@ def update_job_status(job_id: str, status: str, progress: int = None,
             "result": result,
             "updated_at": datetime.now().isoformat()
         })
+
+def detect_file_format_from_binary(binary_content):
+    """Detect file format from binary content and return appropriate extension"""
+    if not binary_content or not isinstance(binary_content, bytes):
+        return None
+    
+    # Check various file signatures
+    if binary_content.startswith(b'\x89PNG\r\n\x1a\n'):
+        return '.png'
+    elif binary_content.startswith(b'\xff\xd8\xff'):
+        return '.jpg'
+    elif binary_content.startswith(b'GIF87a') or binary_content.startswith(b'GIF89a'):
+        return '.gif'
+    elif binary_content.startswith(b'BM'):
+        return '.bmp'
+    elif binary_content.startswith(b'RIFF') and len(binary_content) > 12 and b'WEBP' in binary_content[8:12]:
+        return '.webp'
+    elif binary_content.startswith(b'RIFF') and len(binary_content) > 12 and b'WAVE' in binary_content[8:12]:
+        return '.wav'
+    elif binary_content.startswith(b'ID3') or binary_content[0:2] in [b'\xff\xfb', b'\xff\xf3', b'\xff\xf2']:
+        return '.mp3'
+    elif binary_content.startswith(b'%PDF'):
+        return '.pdf'
+    elif binary_content.startswith(b'PK\x03\x04'):
+        # ZIP-based formats
+        if b'word/' in binary_content[:1000]:
+            return '.docx'
+        elif b'xl/' in binary_content[:1000]:
+            return '.xlsx'
+        else:
+            return '.zip'
+    
+    # If no format detected, return None to keep original filename
+    return None
+
+def create_layered_data_container(layers_info):
+    """Create a container that holds multiple data layers with proper format preservation
+    
+    Args:
+        layers_info: List of tuples (data, filename, is_binary) or just data items
+    
+    Returns:
+        JSON string containing the layered container
+    """
+    import json
+    import base64
+    import mimetypes
+    
+    container = {
+        "version": "1.0",
+        "type": "layered_container", 
+        "created_at": datetime.now().isoformat(),
+        "layers": []
+    }
+    
+    for i, layer_item in enumerate(layers_info):
+        # Defensive check for None or invalid layer items
+        if layer_item is None:
+            print(f"Warning: None layer item at index {i}, skipping")
+            continue
+            
+        # Handle different input formats
+        if isinstance(layer_item, tuple) and len(layer_item) >= 2:
+            # Format: (data, filename) or (data, filename, is_binary)
+            layer_content = layer_item[0]
+            original_filename = layer_item[1]
+            is_binary = layer_item[2] if len(layer_item) > 2 else isinstance(layer_content, bytes)
+            
+            # Check for None content in tuple
+            if layer_content is None:
+                print(f"Warning: None content in layer tuple at index {i}, skipping")
+                continue
+        else:
+            # Just data, infer format
+            layer_content = layer_item
+            original_filename = None
+            is_binary = isinstance(layer_content, bytes)
+            
+            # Check for None content
+            if layer_content is None:
+                print(f"Warning: None content at index {i}, skipping")
+                continue
+        
+        # Determine data type and filename
+        if isinstance(layer_content, str):
+            encoded_content = base64.b64encode(layer_content.encode('utf-8')).decode('ascii')
+            data_type = "text"
+            if not original_filename:
+                original_filename = f"layer_{i+1}.txt"
+        elif isinstance(layer_content, bytes):
+            encoded_content = base64.b64encode(layer_content).decode('ascii')
+            data_type = "binary"
+            
+            # Enhanced filename detection for binary data
+            if not original_filename or original_filename in ["existing_data", "extracted_data.bin", "layer_data"]:
+                # Check for common binary file signatures to determine proper extension
+                if layer_content.startswith(b'\x89PNG\r\n\x1a\n'):
+                    original_filename = f"layer_{i+1}.png"
+                elif layer_content.startswith(b'\xff\xd8\xff'):
+                    original_filename = f"layer_{i+1}.jpg"
+                elif layer_content.startswith(b'GIF87a') or layer_content.startswith(b'GIF89a'):
+                    original_filename = f"layer_{i+1}.gif"
+                elif layer_content.startswith(b'BM'):
+                    original_filename = f"layer_{i+1}.bmp"
+                elif layer_content.startswith(b'RIFF') and b'WEBP' in layer_content[:12]:
+                    original_filename = f"layer_{i+1}.webp"
+                elif layer_content.startswith(b'RIFF') and b'WAVE' in layer_content[:12]:
+                    original_filename = f"layer_{i+1}.wav"
+                elif layer_content.startswith(b'ID3') or layer_content[0:2] == b'\xff\xfb' or layer_content[0:2] == b'\xff\xf3':
+                    original_filename = f"layer_{i+1}.mp3"
+                elif layer_content.startswith(b'%PDF'):
+                    original_filename = f"layer_{i+1}.pdf"
+                elif layer_content.startswith(b'PK\x03\x04'):  # ZIP file
+                    # Could be DOCX, XLSX, etc.
+                    if b'word/' in layer_content[:1000]:
+                        original_filename = f"layer_{i+1}.docx"
+                    elif b'xl/' in layer_content[:1000]:
+                        original_filename = f"layer_{i+1}.xlsx"
+                    else:
+                        original_filename = f"layer_{i+1}.zip"
+                else:
+                    original_filename = f"layer_{i+1}.bin"
+            
+            # If we have a filename but it doesn't have proper extension, try to fix it
+            elif original_filename and not any(original_filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.wav', '.mp3', '.pdf', '.docx', '.xlsx', '.zip', '.bin']):
+                # Add proper extension based on content
+                if layer_content.startswith(b'\x89PNG\r\n\x1a\n'):
+                    original_filename += ".png"
+                elif layer_content.startswith(b'\xff\xd8\xff'):
+                    original_filename += ".jpg"
+                elif layer_content.startswith(b'GIF87a') or layer_content.startswith(b'GIF89a'):
+                    original_filename += ".gif"
+                elif layer_content.startswith(b'BM'):
+                    original_filename += ".bmp"
+                elif layer_content.startswith(b'RIFF') and b'WAVE' in layer_content[:12]:
+                    original_filename += ".wav"
+                elif layer_content.startswith(b'ID3') or layer_content[0:2] in [b'\xff\xfb', b'\xff\xf3']:
+                    original_filename += ".mp3"
+                elif layer_content.startswith(b'%PDF'):
+                    original_filename += ".pdf"
+                else:
+                    original_filename += ".bin"
+        else:
+            # Convert other types to string
+            encoded_content = base64.b64encode(str(layer_content).encode('utf-8')).decode('ascii')
+            data_type = "text"
+            if not original_filename:
+                original_filename = f"layer_{i+1}.txt"
+        
+        container["layers"].append({
+            "index": i,
+            "filename": original_filename,
+            "type": data_type,
+            "content": encoded_content,
+            "size": len(layer_content) if isinstance(layer_content, (str, bytes)) else len(str(layer_content))
+        })
+    
+    return json.dumps(container)
+
+def extract_layered_data_container(container_data):
+    """Extract all layers from a layered data container"""
+    import json
+    import base64
+    
+    try:
+        if isinstance(container_data, bytes):
+            container_json = container_data.decode('utf-8')
+        else:
+            container_json = container_data
+        
+        container = json.loads(container_json)
+        
+        if container.get("type") != "layered_container":
+            # Not a layered container, return as-is
+            return [(container_data, "extracted_data.bin")]
+        
+        extracted_layers = []
+        for layer in container.get("layers", []):
+            # Add defensive check for None layer
+            if layer is None:
+                print(f"Warning: None layer found in container, skipping")
+                continue
+            
+            # Ensure layer is a dictionary
+            if not isinstance(layer, dict):
+                print(f"Warning: Invalid layer type {type(layer)}, skipping")
+                continue
+                
+            filename = layer.get("filename", f"layer_{layer.get('index', 0)}.bin")
+            content_b64 = layer.get("content", "")
+            content_type = layer.get("type", "binary")
+            
+            # Defensive check for None or empty content
+            if not content_b64:
+                print(f"Warning: Empty content in layer {layer.get('index', 0)}, skipping")
+                continue
+            
+            try:
+                decoded_content = base64.b64decode(content_b64)
+                if content_type == "text":
+                    # Convert back to string for text content
+                    decoded_content = decoded_content.decode('utf-8')
+                else:
+                    # For binary content, detect file format and fix filename
+                    if isinstance(decoded_content, bytes) and decoded_content:
+                        detected_extension = detect_file_format_from_binary(decoded_content)
+                        if detected_extension and (filename.endswith('.bin') or 'layer_' in filename):
+                            # Replace generic filename with detected format
+                            layer_num = layer.get('index', len(extracted_layers) + 1)
+                            filename = f"layer_{layer_num}{detected_extension}"
+                            print(f"[EXTRACT] Detected format for layer {layer_num}: {detected_extension}")
+                
+                extracted_layers.append((decoded_content, filename))
+            except Exception as decode_error:
+                print(f"Error decoding layer {layer.get('index', 0)}: {decode_error}")
+                continue
+        
+        return extracted_layers
+        
+    except Exception as e:
+        print(f"Error extracting layered container: {e}")
+        # Return original data if parsing fails
+        return [(container_data, "extracted_data.bin")]
+
+def is_layered_container(data):
+    """Check if the data is a layered container"""
+    try:
+        if isinstance(data, bytes):
+            data_str = data.decode('utf-8')
+        else:
+            data_str = str(data)
+        
+        parsed = json.loads(data_str)
+        return parsed.get("type") == "layered_container"
+    except:
+        return False
+
+def get_steganography_manager(carrier_type: str, password: str = ""):
+    """Get the appropriate steganography manager for the carrier type"""
+    if carrier_type not in steganography_managers or steganography_managers[carrier_type] is None:
+        return None
+    
+    try:
+        return steganography_managers[carrier_type](password=password)
+    except Exception as e:
+        print(f"Error creating {carrier_type} manager: {e}")
+        return None
 
 # ============================================================================
 # USER MANAGEMENT ENDPOINTS
@@ -417,16 +667,20 @@ async def embed_data(
                 f.write(content)
         
         # Log operation start in database
+        db_operation_id = None
         if db and user_id:
-            db.log_operation_start(
+            db_operation_id = db.log_operation_start(
                 user_id=user_id,
-                operation_type="embed",
+                operation_type="hide",
                 media_type=carrier_type,
                 original_filename=carrier_file.filename,
                 password=password
             )
         
         # Start background processing with file paths instead of UploadFile objects
+        # Generate output filename early so we can return it in the response
+        expected_output_filename = generate_unique_filename(carrier_filename, "stego_")
+        
         background_tasks.add_task(
             process_embed_operation,
             operation_id,
@@ -439,13 +693,16 @@ async def embed_data(
             encryption_type,
             project_name,
             user_id,
-            db
+            db,
+            expected_output_filename,  # Pass the expected filename
+            db_operation_id  # Pass the database operation ID separately
         )
         
         return OperationResponse(
             success=True,
             operation_id=operation_id,
-            message="Embedding operation started"
+            message="Embedding operation started",
+            output_filename=expected_output_filename
         )
         
     except Exception as e:
@@ -498,8 +755,9 @@ async def extract_data(
             f.write(content)
         
         # Log operation start in database
+        db_operation_id = None
         if db and user_id:
-            db.log_operation_start(
+            db_operation_id = db.log_operation_start(
                 user_id=user_id,
                 operation_type="extract",
                 media_type=carrier_type,
@@ -516,7 +774,8 @@ async def extract_data(
             password,
             output_format,
             user_id,
-            db
+            db,
+            db_operation_id  # Pass the database operation ID
         )
         
         return OperationResponse(
@@ -528,6 +787,98 @@ async def extract_data(
     except Exception as e:
         if operation_id in active_jobs:
             update_job_status(operation_id, "failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/analyze")
+async def analyze_file(
+    file: UploadFile = File(...),
+    password: str = Form(...),
+    user_id: Optional[str] = Form(None)
+):
+    """Analyze a file to check for existing hidden data"""
+    try:
+        # Determine file type
+        file_extension = Path(file.filename).suffix.lower()
+        if file_extension in ['.png', '.jpg', '.jpeg', '.bmp']:
+            carrier_type = "image"
+        elif file_extension in ['.mp4', '.avi', '.mov', '.mkv']:
+            carrier_type = "video"
+        elif file_extension in ['.wav', '.mp3', '.flac']:
+            carrier_type = "audio"
+        elif file_extension in ['.pdf', '.docx', '.txt']:
+            carrier_type = "document"
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file format")
+        
+        # Save file temporarily
+        temp_filename = generate_unique_filename(file.filename, "analyze_")
+        temp_file_path = UPLOAD_DIR / temp_filename
+        
+        with open(temp_file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        # Get appropriate steganography manager
+        manager = get_steganography_manager(carrier_type, password)
+        if not manager:
+            raise HTTPException(status_code=500, detail=f"No manager available for {carrier_type}")
+        
+        # Try to extract existing data
+        analysis_result = {
+            "has_hidden_data": False,
+            "is_layered": False,
+            "layer_count": 0,
+            "data_preview": None,
+            "error": None
+        }
+        
+        try:
+            extracted_data = manager.extract_data(str(temp_file_path))
+            
+            if extracted_data and extracted_data.strip():
+                analysis_result["has_hidden_data"] = True
+                
+                # Check if it's layered data
+                data_to_check = extracted_data
+                if isinstance(extracted_data, tuple):
+                    data_to_check = extracted_data[0]
+                
+                if isinstance(data_to_check, bytes):
+                    try:
+                        data_to_check = data_to_check.decode('utf-8')
+                    except UnicodeDecodeError:
+                        data_to_check = str(data_to_check)
+                
+                if is_layered_container(data_to_check):
+                    analysis_result["is_layered"] = True
+                    layers = extract_layered_data_container(data_to_check)
+                    analysis_result["layer_count"] = len(layers)
+                    analysis_result["data_preview"] = f"Layered container with {len(layers)} layers"
+                else:
+                    analysis_result["layer_count"] = 1
+                    # Provide safe preview
+                    if isinstance(data_to_check, str):
+                        analysis_result["data_preview"] = data_to_check[:100] + "..." if len(data_to_check) > 100 else data_to_check
+                    else:
+                        analysis_result["data_preview"] = f"Binary data ({len(data_to_check)} bytes)"
+        
+        except Exception as e:
+            analysis_result["error"] = f"Failed to extract data: {str(e)}"
+        
+        finally:
+            # Clean up temporary file
+            if temp_file_path.exists():
+                os.remove(temp_file_path)
+        
+        return {
+            "success": True,
+            "analysis": analysis_result
+        }
+        
+    except Exception as e:
+        # Clean up on error
+        if 'temp_file_path' in locals() and temp_file_path.exists():
+            os.remove(temp_file_path)
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
@@ -629,10 +980,13 @@ async def process_embed_operation(
     encryption_type: str,
     project_name: Optional[str],
     user_id: Optional[str],
-    db: Optional[SteganographyDatabase]
+    db: Optional[SteganographyDatabase],
+    expected_output_filename: Optional[str] = None,
+    db_operation_id: Optional[str] = None
 ):
     """Background task to process embedding operation"""
     
+    import json
     start_time = time.time()
     
     try:
@@ -653,16 +1007,228 @@ async def process_embed_operation(
         if not manager:
             raise Exception(f"No manager available for {carrier_type}")
         
+        update_job_status(operation_id, "processing", 40, "Checking for existing hidden data")
+        
+        # Check if carrier already contains hidden data
+        existing_data = None
+        original_filename = None
+        try:
+            # Try to extract existing data
+            extraction_result = manager.extract_data(carrier_file_path)
+            
+            # Handle tuple return (data, filename) from some managers
+            if isinstance(extraction_result, tuple):
+                existing_data, original_filename = extraction_result
+            else:
+                existing_data = extraction_result
+                original_filename = None
+            
+            # Check if we found meaningful existing data
+            if existing_data:
+                print(f"[EMBED] Found existing data: type={type(existing_data)}, size={len(existing_data) if hasattr(existing_data, '__len__') else 'unknown'}")
+                
+                # Check if existing data is already a layered container
+                is_existing_layered = False
+                existing_data_for_check = existing_data
+                
+                # Add comprehensive debugging for second embedding attempt
+                print(f"[EMBED DEBUG] Processing existing data - Type: {type(existing_data)}")
+                print(f"[EMBED DEBUG] Current operation - content_type: {content_type}")
+                print(f"[EMBED DEBUG] Current operation - content_file_path: {content_file_path}")
+                print(f"[EMBED DEBUG] Current operation - text_content: {text_content is not None}")
+                
+                if isinstance(existing_data, bytes):
+                    print(f"[EMBED DEBUG] Bytes data length: {len(existing_data)}")
+                    print(f"[EMBED DEBUG] First 100 bytes: {existing_data[:100]}")
+                
+                # Only try to decode bytes to string if it looks like JSON
+                if isinstance(existing_data, bytes):
+                    try:
+                        # Only decode if it starts with { (JSON indicator)
+                        if existing_data.startswith(b'{'):
+                            decoded_str = existing_data.decode('utf-8')
+                            print(f"[EMBED DEBUG] Decoded string length: {len(decoded_str)}")
+                            print(f"[EMBED DEBUG] First 200 chars: {decoded_str[:200]}")
+                            
+                            is_existing_layered = is_layered_container(decoded_str)
+                            print(f"[EMBED DEBUG] is_layered_container result: {is_existing_layered}")
+                            
+                            if is_existing_layered:
+                                existing_data_for_check = decoded_str
+                                print(f"[EMBED DEBUG] Set existing_data_for_check to decoded string")
+                            else:
+                                print(f"[EMBED DEBUG] Not a layered container, treating as binary data")
+                    except (UnicodeDecodeError, json.JSONDecodeError) as decode_error:
+                        # Not a layered container, treat as binary data
+                        print(f"[EMBED DEBUG] Decode error: {decode_error}, treating as binary data")
+                        pass
+                elif isinstance(existing_data, str):
+                    print(f"[EMBED DEBUG] String data length: {len(existing_data)}")
+                    print(f"[EMBED DEBUG] First 200 chars: {existing_data[:200]}")
+                    is_existing_layered = is_layered_container(existing_data)
+                    print(f"[EMBED DEBUG] is_layered_container result for string: {is_existing_layered}")
+                
+                print(f"[EMBED DEBUG] Final check - is_existing_layered: {is_existing_layered}, existing_data_for_check type: {type(existing_data_for_check)}")
+                
+                # Only proceed with layering if we have non-empty data
+                should_create_layer = False
+                if isinstance(existing_data, str) and existing_data.strip():
+                    should_create_layer = True
+                elif isinstance(existing_data, bytes) and len(existing_data) > 0:
+                    should_create_layer = True
+                
+                print(f"[EMBED DEBUG] should_create_layer: {should_create_layer}")
+                
+                if should_create_layer:
+                    update_job_status(operation_id, "processing", 45, f"Found existing data, creating layered container")
+                    
+                    # Prepare existing layers
+                    existing_layers = []  # Initialize to prevent NoneType errors
+                    
+                    if is_existing_layered:
+                        # Extract existing layers from layered container
+                        print(f"[EMBED DEBUG] Attempting to extract existing layers from layered container")
+                        print(f"[EMBED DEBUG] existing_data_for_check type: {type(existing_data_for_check)}")
+                        print(f"[EMBED DEBUG] existing_data_for_check value preview: {str(existing_data_for_check)[:500] if existing_data_for_check else 'None'}")
+                        
+                        try:
+                            # Add extra safety check before calling extraction
+                            if existing_data_for_check is None:
+                                print(f"[EMBED ERROR] existing_data_for_check is None before extraction!")
+                                existing_layers = []
+                            else:
+                                extracted_layers = extract_layered_data_container(existing_data_for_check)
+                                print(f"[EMBED DEBUG] extract_layered_data_container returned: {type(extracted_layers)}")
+                                
+                                if extracted_layers is not None and isinstance(extracted_layers, list):
+                                    existing_layers = extracted_layers
+                                    print(f"[EMBED DEBUG] Successfully extracted {len(existing_layers)} existing layers")
+                                    update_job_status(operation_id, "processing", 47, f"Extracted {len(existing_layers)} existing layers")
+                                    
+                                    # Debug each extracted layer
+                                    for idx, layer in enumerate(existing_layers):
+                                        if layer is None:
+                                            print(f"[EMBED ERROR] Layer {idx} is None!")
+                                        elif not isinstance(layer, tuple) or len(layer) != 2:
+                                            print(f"[EMBED ERROR] Layer {idx} has invalid format: {type(layer)}, length: {len(layer) if hasattr(layer, '__len__') else 'no length'}")
+                                        else:
+                                            print(f"[EMBED DEBUG] Layer {idx}: content type={type(layer[0])}, filename='{layer[1]}'")
+                                else:
+                                    print(f"[EMBED WARNING] extract_layered_data_container returned {type(extracted_layers)}, using empty list")
+                                    existing_layers = []
+                        except Exception as e:
+                            print(f"[EMBED ERROR] Failed to extract existing layers: {e}")
+                            print(f"[EMBED ERROR] Exception type: {type(e)}")
+                            import traceback
+                            print(f"[EMBED ERROR] Traceback: {traceback.format_exc()}")
+                            existing_layers = []
+                    else:
+                        # Convert existing single data to first layer
+                        # Determine appropriate filename for existing data
+                        if original_filename and original_filename.strip():
+                            existing_filename = original_filename
+                        else:
+                            # Auto-detect filename based on content type
+                            if isinstance(existing_data, bytes):
+                                detected_ext = detect_file_format_from_binary(existing_data)
+                                if detected_ext:
+                                    existing_filename = f"existing_file{detected_ext}"
+                                else:
+                                    existing_filename = "existing_file.bin"
+                            else:
+                                existing_filename = "existing_text.txt"
+                        
+                        existing_layers = [(existing_data, existing_filename)]
+                        update_job_status(operation_id, "processing", 47, f"Converting existing data to layer: {existing_filename}")
+                    
+                    # Prepare new content layer
+                    new_layer_info = None
+                    try:
+                        if content_type == "text":
+                            new_layer_info = (content_to_hide, "new_message.txt")
+                            print(f"[EMBED DEBUG] Created text layer: new_message.txt")
+                        else:
+                            # For file content, preserve original filename
+                            new_filename = "new_file.bin"  # Default fallback
+                            
+                            if content_file_path and Path(content_file_path).exists():
+                                new_filename = Path(content_file_path).name
+                                print(f"[EMBED DEBUG] Using original filename: {new_filename}")
+                            else:
+                                # Detect format if no filename available or file doesn't exist
+                                if isinstance(content_to_hide, bytes):
+                                    detected_ext = detect_file_format_from_binary(content_to_hide)
+                                    new_filename = f"new_file{detected_ext}" if detected_ext else "new_file.bin"
+                                    print(f"[EMBED DEBUG] Detected filename: {new_filename}")
+                                else:
+                                    print(f"[EMBED DEBUG] Using default filename: {new_filename}")
+                            
+                            new_layer_info = (content_to_hide, new_filename)
+                            print(f"[EMBED DEBUG] Created file layer: {new_filename}")
+                    except Exception as e:
+                        print(f"[EMBED ERROR] Failed to create new layer info: {e}")
+                        print(f"[EMBED ERROR] content_file_path: {content_file_path}")
+                        print(f"[EMBED ERROR] content_to_hide type: {type(content_to_hide)}")
+                        import traceback
+                        print(f"[EMBED ERROR] Traceback: {traceback.format_exc()}")
+                        new_layer_info = (content_to_hide, "error_recovery.bin")
+                    
+                    # Add new layer to existing layers only if valid
+                    if new_layer_info is not None and existing_layers is not None:
+                        existing_layers.append(new_layer_info)
+                        update_job_status(operation_id, "processing", 48, f"Added new content as layer {len(existing_layers)}: {new_layer_info[1]}")
+                        
+                        # Create layered container with all layers
+                        try:
+                            layered_container = create_layered_data_container(existing_layers)
+                            if layered_container is not None:
+                                # Replace content with layered container (as string since it's JSON)
+                                content_to_hide = layered_container
+                                # Update content type since we're now embedding JSON text, not the original file
+                                content_type = "text"
+                                original_filename = None
+                                
+                                update_job_status(operation_id, "processing", 49, f"Created layered container with {len(existing_layers)} layers")
+                                print(f"[EMBED] Successfully created layered container with {len(existing_layers)} layers")
+                            else:
+                                print("[EMBED ERROR] create_layered_data_container returned None, falling back to normal embedding")
+                        except Exception as e:
+                            print(f"[EMBED ERROR] Failed to create layered container: {e}, falling back to normal embedding")
+                    else:
+                        print(f"[EMBED ERROR] Invalid layer data: new_layer_info={new_layer_info}, existing_layers={existing_layers}, falling back to normal embedding")
+                    
+        except Exception as e:
+            # If extraction fails, it likely means no hidden data exists
+            update_job_status(operation_id, "processing", 42, f"No existing data found or extraction failed: {str(e)}")
+            print(f"[EMBED] No existing data detected: {e}")
+            # Continue with normal embedding
+            pass
+        
         # Generate output filename
         carrier_filename = Path(carrier_file_path).name
-        output_filename = generate_unique_filename(carrier_filename, "stego_")
+        if expected_output_filename:
+            output_filename = expected_output_filename
+        else:
+            output_filename = generate_unique_filename(carrier_filename, "stego_")
         output_path = OUTPUT_DIR / output_filename
         
         # Perform embedding
+        # After layered container creation, content_type might have been changed to "text"
+        # So we need to determine is_file and original_filename based on the current state
         is_file = content_type == "file"
         original_filename = None
-        if is_file and content_file_path:
+        
+        # Only set original_filename if we're still dealing with a file (not layered container)
+        if is_file and content_file_path and Path(content_file_path).exists():
             original_filename = Path(content_file_path).name
+        
+        print(f"[EMBED DEBUG] Final embedding parameters:")
+        print(f"  content_type: {content_type}")
+        print(f"  is_file: {is_file}")
+        print(f"  original_filename: {original_filename}")
+        print(f"  content_file_path: {content_file_path}")
+        print(f"  content_to_hide type: {type(content_to_hide)}")
+        print(f"  content_to_hide size: {len(content_to_hide) if hasattr(content_to_hide, '__len__') else 'unknown'}")
         
         if carrier_type == "video":
             # Video manager returns a dict result
@@ -715,10 +1281,10 @@ async def process_embed_operation(
         processing_time = time.time() - start_time
         
         # Log completion in database
-        if db and user_id:
+        if db and user_id and db_operation_id:
             message_preview = text_content[:100] if content_type == "text" else f"File: {Path(content_file_path).name if content_file_path else 'unknown'}"
             db.log_operation_complete(
-                operation_id,
+                db_operation_id,
                 success=True,
                 output_filename=output_filename,
                 file_size=os.path.getsize(output_path),
@@ -748,9 +1314,9 @@ async def process_embed_operation(
         update_job_status(operation_id, "failed", error=error_msg)
         
         # Log failure in database
-        if db and user_id:
+        if db and user_id and db_operation_id:
             db.log_operation_complete(
-                operation_id,
+                db_operation_id,
                 success=False,
                 error_message=error_msg,
                 processing_time=time.time() - start_time
@@ -763,7 +1329,8 @@ async def process_extract_operation(
     password: str,
     output_format: str,
     user_id: Optional[str],
-    db: Optional[SteganographyDatabase]
+    db: Optional[SteganographyDatabase],
+    db_operation_id: Optional[str] = None
 ):
     """Background task to process extraction operation"""
     
@@ -790,65 +1357,139 @@ async def process_extract_operation(
             extracted_data = extraction_result
             original_filename = None
         
-        update_job_status(operation_id, "processing", 80, "Saving extracted data")
+        update_job_status(operation_id, "processing", 70, "Checking for layered data")
         
-        # Determine if this is a text message vs a file based on filename
-        # Only treat as text message if explicitly returned as a text extraction
-        is_text_message = (
-            original_filename == "extracted_message.txt" or
-            original_filename == "embedded_text.txt"
-        )
-        
-        # Save extracted data
-        if original_filename and original_filename.strip():
-            # Use the original filename as provided by the steganography module
-            output_filename = original_filename
-            # Basic sanitization - only remove truly problematic characters
-            import re
-            output_filename = re.sub(r'[<>:"/\\|?*]', '_', output_filename)
-            
-            # Ensure we have a valid filename
-            if not output_filename or output_filename.startswith('.') or len(output_filename.strip()) == 0:
-                # Extract extension from original filename if possible
-                original_ext = Path(original_filename).suffix if original_filename else ".bin"
-                output_filename = f"extracted_file_{int(time.time())}{original_ext}"
-        else:
-            # Fallback to generic filename
-            if isinstance(extracted_data, str):
-                output_filename = f"extracted_text_{int(time.time())}.txt"
-            else:
-                output_filename = f"extracted_file_{int(time.time())}.bin"
-        
-        output_path = OUTPUT_DIR / output_filename
-        
-        # Save the file based on data type and whether it's a text message
+        # Check if extracted data is a layered container
+        is_layered_data = False
         if isinstance(extracted_data, str):
-            # String data - always save as text
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(extracted_data)
+            is_layered_data = is_layered_container(extracted_data)
         elif isinstance(extracted_data, bytes):
-            if is_text_message:
-                # This is a text message returned as bytes - decode and save as text
-                try:
-                    decoded_text = extracted_data.decode('utf-8')
-                    with open(output_path, "w", encoding="utf-8") as f:
-                        f.write(decoded_text)
-                except UnicodeDecodeError:
-                    # If decoding fails, save as binary anyway
+            try:
+                decoded_data = extracted_data.decode('utf-8')
+                is_layered_data = is_layered_container(decoded_data)
+                if is_layered_data:
+                    extracted_data = decoded_data
+            except UnicodeDecodeError:
+                is_layered_data = False
+        
+        if is_layered_data:
+            update_job_status(operation_id, "processing", 75, "Extracting multiple layers")
+            print(f"[EXTRACT] Detected layered container, extracting layers...")
+            
+            # Extract all layers from the container
+            layers = extract_layered_data_container(extracted_data)
+            print(f"[EXTRACT] Extracted {len(layers)} layers")
+            
+            # Create a ZIP file containing all layers
+            import zipfile
+            zip_filename = f"extracted_layers_{int(time.time())}.zip"
+            zip_path = OUTPUT_DIR / zip_filename
+            
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for i, (layer_content, layer_filename) in enumerate(layers):
+                    # Use the actual filename from the layer, or generate one
+                    if not layer_filename or layer_filename == "extracted_data.bin":
+                        if isinstance(layer_content, str):
+                            layer_filename = f"layer_{i+1}.txt"
+                        else:
+                            # Try to detect file format for binary content
+                            detected_extension = detect_file_format_from_binary(layer_content)
+                            if detected_extension:
+                                layer_filename = f"layer_{i+1}{detected_extension}"
+                                print(f"[EXTRACT] Detected format for layer {i+1}: {detected_extension}")
+                            else:
+                                layer_filename = f"layer_{i+1}.bin"
+                    
+                    # If filename still ends with .bin, try to detect format
+                    elif layer_filename.endswith('.bin') and isinstance(layer_content, bytes):
+                        detected_extension = detect_file_format_from_binary(layer_content)
+                        if detected_extension:
+                            # Replace .bin with detected extension
+                            layer_filename = layer_filename[:-4] + detected_extension
+                            print(f"[EXTRACT] Fixed .bin filename to: {layer_filename}")
+                    
+                    # Ensure filename is safe for ZIP
+                    import re
+                    layer_filename = re.sub(r'[<>:"/\\|?*]', '_', layer_filename)
+                    
+                    print(f"[EXTRACT] Adding layer {i+1}: {layer_filename} ({len(layer_content)} bytes, type: {type(layer_content)})")
+                    
+                    # Write content to ZIP with proper format preservation
+                    if isinstance(layer_content, str):
+                        zipf.writestr(layer_filename, layer_content.encode('utf-8'))
+                    elif isinstance(layer_content, bytes):
+                        zipf.writestr(layer_filename, layer_content)
+                    else:
+                        # Fallback for other types
+                        zipf.writestr(layer_filename, str(layer_content).encode('utf-8'))
+            
+            print(f"[EXTRACT] Created ZIP file: {zip_filename}")
+            
+            # Set the output path to the ZIP file
+            output_path = zip_path
+            output_filename = zip_filename
+            
+        else:
+            # Single layer extraction - proceed with normal logic
+            update_job_status(operation_id, "processing", 80, "Saving extracted data")
+            
+            # Determine if this is a text message vs a file based on filename
+            # Only treat as text message if explicitly returned as a text extraction
+            is_text_message = (
+                original_filename == "extracted_message.txt" or
+                original_filename == "embedded_text.txt"
+            )
+            
+            # Save extracted data
+            if original_filename and original_filename.strip():
+                # Use the original filename as provided by the steganography module
+                output_filename = original_filename
+                # Basic sanitization - only remove truly problematic characters
+                import re
+                output_filename = re.sub(r'[<>:"/\\|?*]', '_', output_filename)
+                
+                # Ensure we have a valid filename
+                if not output_filename or output_filename.startswith('.') or len(output_filename.strip()) == 0:
+                    # Extract extension from original filename if possible
+                    original_ext = Path(original_filename).suffix if original_filename else ".bin"
+                    output_filename = f"extracted_file_{int(time.time())}{original_ext}"
+            else:
+                # Fallback to generic filename
+                if isinstance(extracted_data, str):
+                    output_filename = f"extracted_text_{int(time.time())}.txt"
+                else:
+                    output_filename = f"extracted_file_{int(time.time())}.bin"
+            
+            output_path = OUTPUT_DIR / output_filename
+            
+            # Save the file based on data type and whether it's a text message
+            if isinstance(extracted_data, str):
+                # String data - always save as text
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(extracted_data)
+            elif isinstance(extracted_data, bytes):
+                if is_text_message:
+                    # This is a text message returned as bytes - decode and save as text
+                    try:
+                        decoded_text = extracted_data.decode('utf-8')
+                        with open(output_path, "w", encoding="utf-8") as f:
+                            f.write(decoded_text)
+                    except UnicodeDecodeError:
+                        # If decoding fails, save as binary anyway
+                        with open(output_path, "wb") as f:
+                            f.write(extracted_data)
+                else:
+                    # This is file content - save as binary to preserve format
                     with open(output_path, "wb") as f:
                         f.write(extracted_data)
             else:
-                # This is file content - save as binary to preserve format
-                with open(output_path, "wb") as f:
-                    f.write(extracted_data)
-        else:
-            raise Exception(f"Unexpected extracted data type: {type(extracted_data)}")
+                raise Exception(f"Unexpected extracted data type: {type(extracted_data)}")
         
         # Calculate processing time
         processing_time = time.time() - start_time
         
         # Log completion in database
-        if db and user_id:
+        if db and user_id and db_operation_id:
             if isinstance(extracted_data, str):
                 preview = extracted_data[:100]
             elif isinstance(extracted_data, bytes):
@@ -857,7 +1498,7 @@ async def process_extract_operation(
                 preview = f"Unknown data type: {type(extracted_data)}"
             
             db.log_operation_complete(
-                operation_id,
+                db_operation_id,
                 success=True,
                 output_filename=output_filename,
                 file_size=os.path.getsize(output_path),
@@ -890,9 +1531,9 @@ async def process_extract_operation(
         update_job_status(operation_id, "failed", error=error_msg)
         
         # Log failure in database
-        if db and user_id:
+        if db and user_id and db_operation_id:
             db.log_operation_complete(
-                operation_id,
+                db_operation_id,
                 success=False,
                 error_message=error_msg,
                 processing_time=time.time() - start_time
@@ -960,7 +1601,7 @@ async def list_operations(limit: int = 100):
             "created_at": job["created_at"],
             "carrier_type": job.get("carrier_type"),
             "content_type": job.get("content_type"),
-            "operation_type": job.get("operation_type", "embed")
+            "operation_type": job.get("operation_type", "hide")
         })
     
     return {"operations": operations}

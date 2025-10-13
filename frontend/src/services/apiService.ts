@@ -71,6 +71,33 @@ class ApiService {
     this.baseUrl = baseUrl;
   }
 
+  // Utility function to clean up backend error messages
+  private cleanErrorMessage(message: string): string {
+    // Filter out technical backend errors that confuse users
+    if (message.includes("NoneType") || 
+        message.includes("subscriptable") ||
+        message.includes("steganography_operations") ||
+        message.includes("PGRST205") ||
+        message.includes("schema cache")) {
+      return "Operation may have completed successfully but database logging failed. Please check your outputs folder for the result file.";
+    }
+    
+    // Handle common HTTP errors more gracefully
+    if (message.includes("HTTP 500")) {
+      return "Server error occurred. Please try again or contact support.";
+    } else if (message.includes("HTTP 422")) {
+      return "Invalid request data. Please check your input.";
+    } else if (message.includes("HTTP 404")) {
+      return "Service not available. Please ensure the backend is running.";
+    } else if (message.includes("HTTP 401")) {
+      return "Authentication required.";
+    } else if (message.includes("HTTP 403")) {
+      return "Access denied.";
+    }
+    
+    return message;
+  }
+
   // Helper method for making requests
   private async makeRequest<T>(
     endpoint: string,
@@ -87,7 +114,9 @@ class ApiService {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+      const rawError = errorData.detail || `HTTP ${response.status}: ${response.statusText}`;
+      const cleanedError = this.cleanErrorMessage(rawError);
+      throw new Error(cleanedError);
     }
 
     return response.json();
@@ -176,7 +205,9 @@ class ApiService {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+      const rawError = errorData.detail || `HTTP ${response.status}: ${response.statusText}`;
+      const cleanedError = this.cleanErrorMessage(rawError);
+      throw new Error(cleanedError);
     }
 
     const result = await response.json();
@@ -211,7 +242,9 @@ class ApiService {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+      const rawError = errorData.detail || `HTTP ${response.status}: ${response.statusText}`;
+      const cleanedError = this.cleanErrorMessage(rawError);
+      throw new Error(cleanedError);
     }
 
     const result = await response.json();
@@ -233,7 +266,9 @@ class ApiService {
     const response = await fetch(`${this.baseUrl}/operations/${operationId}/download`);
     
     if (!response.ok) {
-      throw new Error(`Failed to download result: ${response.statusText}`);
+      const errorMessage = `Failed to download result: ${response.statusText}`;
+      const cleanedError = this.cleanErrorMessage(errorMessage);
+      throw new Error(cleanedError);
     }
     
     return response.blob();

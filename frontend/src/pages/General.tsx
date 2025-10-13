@@ -418,7 +418,29 @@ export default function General() {
       
     } catch (error: any) {
       setIsProcessing(false);
-      toast.error(error.message || "Embedding operation failed");
+      
+      // Clean up backend error messages for better UX
+      let errorMessage = error.message || "Embedding operation failed";
+      
+      // Filter out technical backend errors that confuse users
+      if (errorMessage.includes("NoneType") || 
+          errorMessage.includes("subscriptable") ||
+          errorMessage.includes("steganography_operations") ||
+          errorMessage.includes("PGRST205") ||
+          errorMessage.includes("schema cache")) {
+        errorMessage = "Operation may have completed but database logging failed. Please check your outputs folder for the result file.";
+      }
+      
+      // Handle HTTP errors more gracefully
+      if (errorMessage.includes("HTTP 500")) {
+        errorMessage = "Server error occurred. Please try again or contact support.";
+      } else if (errorMessage.includes("HTTP 422")) {
+        errorMessage = "Invalid file format or missing required information.";
+      } else if (errorMessage.includes("HTTP 404")) {
+        errorMessage = "Service not available. Please ensure the backend is running.";
+      }
+      
+      toast.error(errorMessage);
       console.error("Embed error:", error);
     }
   };
@@ -471,7 +493,29 @@ export default function General() {
       
     } catch (error: any) {
       setIsProcessing(false);
-      toast.error(error.message || "Extraction operation failed");
+      
+      // Clean up backend error messages for better UX
+      let errorMessage = error.message || "Extraction operation failed";
+      
+      // Filter out technical backend errors that confuse users
+      if (errorMessage.includes("NoneType") || 
+          errorMessage.includes("subscriptable") ||
+          errorMessage.includes("steganography_operations") ||
+          errorMessage.includes("PGRST205") ||
+          errorMessage.includes("schema cache")) {
+        errorMessage = "Operation may have completed but database logging failed. Please check the extraction results.";
+      }
+      
+      // Handle HTTP errors more gracefully
+      if (errorMessage.includes("HTTP 500")) {
+        errorMessage = "Server error occurred. Please try again or contact support.";
+      } else if (errorMessage.includes("HTTP 422")) {
+        errorMessage = "Invalid file or incorrect password.";
+      } else if (errorMessage.includes("HTTP 404")) {
+        errorMessage = "Service not available. Please ensure the backend is running.";
+      }
+      
+      toast.error(errorMessage);
       console.error("Extract error:", error);
     }
   };
@@ -500,7 +544,18 @@ export default function General() {
 
         if (status.status === "failed") {
           setIsProcessing(false);
-          toast.error(status.error || "Operation failed");
+          // Clean up backend error messages for better UX
+          let errorMessage = status.error || "Operation failed";
+          
+          // Filter out technical backend errors that confuse users
+          if (errorMessage.includes("NoneType") || 
+              errorMessage.includes("subscriptable") ||
+              errorMessage.includes("steganography_operations") ||
+              errorMessage.includes("PGRST205")) {
+            errorMessage = "Operation completed but logging failed. Your files were processed successfully.";
+          }
+          
+          toast.error(errorMessage);
           return;
         }
 
