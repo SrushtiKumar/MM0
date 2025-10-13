@@ -109,6 +109,8 @@ export default function General() {
   const navigate = useNavigate();
   const [selectedTab, setSelectedTab] = useState("embed");
   const [carrierFile, setCarrierFile] = useState<File | null>(null);
+  const [carrierFiles, setCarrierFiles] = useState<File[]>([]); // Multiple carrier files
+  const [batchMode, setBatchMode] = useState(false); // Toggle between single and batch mode
   const [extractFile, setExtractFile] = useState<File | null>(null);
   const [contentType, setContentType] = useState("text");
   const [textContent, setTextContent] = useState("");
@@ -247,6 +249,52 @@ export default function General() {
     }
   };
 
+  const handleCarrierFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files);
+      setCarrierFiles(files);
+      
+      // Auto-detect carrier type from first file
+      const firstFile = files[0];
+      const extension = firstFile.name.split('.').pop()?.toLowerCase();
+      let detectedType = carrierType;
+      
+      if (extension) {
+        if (['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'gif'].includes(extension)) {
+          detectedType = "image";
+        } else if (['mp4', 'avi', 'mov', 'mkv', 'wmv'].includes(extension)) {
+          detectedType = "video";
+        } else if (['wav', 'mp3', 'flac', 'ogg', 'aac'].includes(extension)) {
+          detectedType = "audio";
+        } else if (['pdf', 'doc', 'docx', 'txt'].includes(extension)) {
+          detectedType = "document";
+        }
+        
+        if (detectedType !== carrierType) {
+          setCarrierType(detectedType);
+        }
+      }
+      
+      // Validate all files
+      setTimeout(() => {
+        if (supportedFormats) {
+          files.forEach((file, index) => {
+            try {
+              validateFile(file, detectedType);
+            } catch (error) {
+              toast.error(`File ${index + 1} (${file.name}): ${error}`);
+            }
+          });
+        }
+      }, 100);
+    }
+  };
+
+  const removeCarrierFile = (index: number) => {
+    const newFiles = carrierFiles.filter((_, i) => i !== index);
+    setCarrierFiles(newFiles);
+  };
+
   const handleExtractFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
@@ -379,10 +427,17 @@ export default function General() {
   };
 
   const handleEmbed = async () => {
-    // Validation
-    if (!carrierFile) {
-      toast.error("Please select a carrier file");
-      return;
+    // Validation for batch vs single mode
+    if (batchMode) {
+      if (!carrierFiles || carrierFiles.length === 0) {
+        toast.error("Please select at least one carrier file for batch processing");
+        return;
+      }
+    } else {
+      if (!carrierFile) {
+        toast.error("Please select a carrier file");
+        return;
+      }
     }
 
     if (contentType === "text" && !textContent.trim()) {
@@ -400,9 +455,18 @@ export default function General() {
       return;
     }
 
-    // Validate file format
-    if (!validateFile(carrierFile, carrierType)) {
-      return;
+    // Validate file format(s)
+    if (batchMode) {
+      for (let i = 0; i < carrierFiles.length; i++) {
+        if (!validateFile(carrierFiles[i], carrierType)) {
+          toast.error(`Validation failed for file ${i + 1}: ${carrierFiles[i].name}`);
+          return;
+        }
+      }
+    } else {
+      if (!validateFile(carrierFile, carrierType)) {
+        return;
+      }
     }
 
     setIsProcessing(true);
@@ -411,10 +475,19 @@ export default function General() {
     setCurrentOperationId(null);
     
     try {
-      // Prepare form data
       const formData = new FormData();
-      formData.append('carrier_file', carrierFile);
-      formData.append('carrier_type', carrierType);
+      
+      if (batchMode) {
+        // Add all carrier files for batch processing
+        carrierFiles.forEach((file, index) => {
+          formData.append('carrier_files', file);
+        });
+      } else {
+        // Single file processing
+        formData.append('carrier_file', carrierFile);
+        formData.append('carrier_type', carrierType);
+      }
+      
       formData.append('content_type', contentType);
       formData.append('password', password);
       formData.append('encryption_type', encryptionType);
@@ -440,7 +513,8 @@ export default function General() {
       }
 
       // Make API call
-      const response = await fetch(`${API_BASE_URL}/embed`, {
+      const endpoint = batchMode ? `${API_BASE_URL}/embed-batch` : `${API_BASE_URL}/embed`;
+      const response = await fetch(endpoint, {
         method: 'POST',
         body: formData
       });
@@ -627,14 +701,24 @@ export default function General() {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/operations/${currentOperationId}/download`);
+      // Check if this is a batch operation
+      const isBatchOperation = operationResult?.batch_operation || false;
+      const downloadEndpoint = isBatchOperation 
+        ? `${API_BASE_URL}/operations/${currentOperationId}/download-batch`
+        : `${API_BASE_URL}/operations/${currentOperationId}/download`;
+      
+      const response = await fetch(downloadEndpoint);
       
       if (!response.ok) {
         throw new Error(`Failed to download: ${response.statusText}`);
       }
 
       const blob = await response.blob();
-      const defaultFilename = operationResult?.filename || `result_${Date.now()}`;
+      
+      // For batch operations, suggest a ZIP filename
+      const defaultFilename = isBatchOperation 
+        ? `batch_results_${Date.now()}.zip`
+        : (operationResult?.filename || `result_${Date.now()}`);
       
       // Try to use the modern File System Access API
       if ('showSaveFilePicker' in window) {
@@ -914,24 +998,96 @@ export default function General() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                      {/* Carrier File Upload */}
+                      {/* Batch Mode Toggle */}
                       <div className="space-y-2">
-                        <Label htmlFor="carrier-file">Carrier File</Label>
-                        <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+                        <Label>Processing Mode</Label>
+                        <div className="flex items-center space-x-2">
                           <input
-                            id="carrier-file"
-                            type="file"
-                            accept="image/*,video/*,audio/*,.wav,.mp3,.flac,.ogg,.aac,.m4a,.pdf,.docx,.txt,.rtf"
-                            onChange={handleCarrierFileChange}
-                            className="hidden"
+                            type="checkbox"
+                            id="batch-mode"
+                            checked={batchMode}
+                            onChange={(e) => setBatchMode(e.target.checked)}
+                            className="rounded"
                           />
-                          <label htmlFor="carrier-file" className="cursor-pointer">
-                            <FileImage className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                            <p className="text-sm text-muted-foreground">
-                              {carrierFile ? carrierFile.name : "Click to upload carrier file"}
-                            </p>
+                          <label htmlFor="batch-mode" className="text-sm font-medium cursor-pointer">
+                            Batch Mode (Multiple Carrier Files)
                           </label>
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                          {batchMode 
+                            ? "Hide the same content in multiple carrier files"
+                            : "Hide content in a single carrier file"
+                          }
+                        </p>
+                      </div>
+                      {/* Carrier File Upload */}
+                      <div className="space-y-2">
+                        <Label htmlFor="carrier-file">
+                          {batchMode ? "Carrier Files (Multiple)" : "Carrier File"}
+                        </Label>
+                        <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+                          {!batchMode ? (
+                            // Single file upload
+                            <>
+                              <input
+                                id="carrier-file"
+                                type="file"
+                                accept="image/*,video/*,audio/*,.wav,.mp3,.flac,.ogg,.aac,.m4a,.pdf,.docx,.txt,.rtf"
+                                onChange={handleCarrierFileChange}
+                                className="hidden"
+                              />
+                              <label htmlFor="carrier-file" className="cursor-pointer">
+                                <FileImage className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                                <p className="text-sm text-muted-foreground">
+                                  {carrierFile ? carrierFile.name : "Click to upload carrier file"}
+                                </p>
+                              </label>
+                            </>
+                          ) : (
+                            // Multiple files upload
+                            <>
+                              <input
+                                id="carrier-files"
+                                type="file"
+                                accept="image/*,video/*,audio/*,.wav,.mp3,.flac,.ogg,.aac,.m4a,.pdf,.docx,.txt,.rtf"
+                                multiple
+                                onChange={handleCarrierFilesChange}
+                                className="hidden"
+                              />
+                              <label htmlFor="carrier-files" className="cursor-pointer">
+                                <FileImage className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                                <p className="text-sm text-muted-foreground">
+                                  {carrierFiles.length > 0 
+                                    ? `${carrierFiles.length} files selected` 
+                                    : "Click to upload multiple carrier files"}
+                                </p>
+                              </label>
+                            </>
+                          )}
+                        </div>
+                        
+                        {/* Display selected files for batch mode */}
+                        {batchMode && carrierFiles.length > 0 && (
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            <Label className="text-xs">Selected Files:</Label>
+                            {carrierFiles.map((file, index) => (
+                              <div key={index} className="flex items-center justify-between bg-muted p-2 rounded text-sm">
+                                <span className="truncate">{file.name}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-muted-foreground">
+                                    {(file.size / 1024).toFixed(1)} KB
+                                  </span>
+                                  <button
+                                    onClick={() => removeCarrierFile(index)}
+                                    className="text-red-500 hover:text-red-700 text-xs"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {/* Auto-detected Carrier Type Display */}
@@ -1135,12 +1291,15 @@ export default function General() {
                       <Button 
                         onClick={handleEmbed} 
                         className="w-full"
-                        disabled={!carrierFile || 
+                        disabled={(batchMode ? (carrierFiles.length === 0) : !carrierFile) || 
                           (contentType === "text" && !textContent.trim()) ||
                           ((contentType === "file" || contentType === "image" || contentType === "video" || contentType === "audio" || contentType === "document") && !fileContent) ||
                           isProcessing}
                       >
-                        {isProcessing ? "Processing..." : "Embed Data"}
+                        {isProcessing 
+                          ? (batchMode ? `Processing ${carrierFiles.length} files...` : "Processing...")
+                          : (batchMode ? `Embed in ${carrierFiles.length} Files` : "Embed Data")
+                        }
                       </Button>
                     </CardContent>
                   </Card>

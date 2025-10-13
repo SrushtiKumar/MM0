@@ -710,6 +710,166 @@ async def embed_data(
             update_job_status(operation_id, "failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/embed-batch", response_model=OperationResponse)
+async def embed_data_batch(
+    carrier_files: List[UploadFile] = File(...),
+    content_file: Optional[UploadFile] = File(None),
+    content_type: str = Form(...),
+    text_content: Optional[str] = Form(None),
+    password: str = Form(...),
+    encryption_type: str = Form("aes-256-gcm"),
+    project_name: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Optional[SteganographyDatabase] = Depends(get_db)
+):
+    """
+    Embed the same data/message into multiple carrier files
+    Returns a batch operation ID that manages all individual operations
+    """
+    try:
+        batch_operation_id = str(uuid.uuid4())
+        
+        # Validate that we have carrier files
+        if not carrier_files or len(carrier_files) == 0:
+            raise HTTPException(status_code=400, detail="At least one carrier file is required")
+        
+        # Validate that all carrier files are properly uploaded
+        for i, carrier_file in enumerate(carrier_files):
+            if not carrier_file.filename:
+                raise HTTPException(status_code=400, detail=f"Carrier file {i+1} has no filename")
+        
+        # Initialize batch job tracking
+        batch_jobs = {
+            "batch_id": batch_operation_id,
+            "total_files": len(carrier_files),
+            "completed_files": 0,
+            "failed_files": 0,
+            "individual_operations": [],
+            "output_files": [],
+            "status": "starting",
+            "created_at": datetime.now().isoformat()
+        }
+        
+        active_jobs[batch_operation_id] = batch_jobs
+        
+        # Process each carrier file
+        for i, carrier_file in enumerate(carrier_files):
+            try:
+                # Auto-detect carrier type if not provided
+                file_extension = Path(carrier_file.filename).suffix.lower()
+                carrier_type = None
+                
+                # Detect carrier type based on file extension
+                if file_extension in ['.mp4', '.avi', '.mov', '.mkv']:
+                    carrier_type = "video"
+                elif file_extension in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
+                    carrier_type = "image"
+                elif file_extension in ['.wav', '.mp3', '.flac', '.ogg']:
+                    carrier_type = "audio"
+                elif file_extension in ['.pdf', '.doc', '.docx']:
+                    carrier_type = "document"
+                else:
+                    # Default to document for unknown types
+                    carrier_type = "document"
+                
+                print(f"[BATCH] Processing carrier file {i+1}/{len(carrier_files)}: {carrier_file.filename} as {carrier_type}")
+                
+                # Generate unique filenames for this carrier file
+                carrier_filename = generate_unique_filename(carrier_file.filename, f"batch_{i+1}_carrier_")
+                carrier_path = UPLOAD_DIR / carrier_filename
+                
+                # Save carrier file
+                with open(carrier_path, "wb") as f:
+                    content = await carrier_file.read()
+                    f.write(content)
+                
+                # Handle content file for this iteration (need to read it fresh each time)
+                content_file_path = None
+                if content_file and content_type == "file":
+                    content_filename = generate_unique_filename(content_file.filename, f"batch_{i+1}_content_")
+                    content_file_path = UPLOAD_DIR / content_filename
+                    
+                    # Read the content file (need to reset the read position)
+                    await content_file.seek(0)  # Reset file position
+                    with open(content_file_path, "wb") as f:
+                        content = await content_file.read()
+                        f.write(content)
+                
+                # Create individual operation ID
+                individual_operation_id = str(uuid.uuid4())
+                
+                # Log operation start in database for each file
+                db_operation_id = None
+                if db and user_id:
+                    db_operation_id = db.log_operation_start(
+                        user_id=user_id,
+                        operation_type="hide",
+                        media_type=carrier_type,
+                        original_filename=carrier_file.filename,
+                        password=password
+                    )
+                
+                # Generate expected output filename
+                expected_output_filename = generate_unique_filename(carrier_filename, "stego_")
+                
+                # Add to batch tracking
+                batch_jobs["individual_operations"].append({
+                    "operation_id": individual_operation_id,
+                    "carrier_filename": carrier_file.filename,
+                    "carrier_type": carrier_type,
+                    "status": "pending",
+                    "expected_output": expected_output_filename
+                })
+                
+                # Start background processing for this file
+                background_tasks.add_task(
+                    process_batch_embed_operation,
+                    individual_operation_id,
+                    batch_operation_id,
+                    i,  # file index
+                    str(carrier_path),
+                    str(content_file_path) if content_file_path else None,
+                    carrier_type,
+                    content_type,
+                    text_content,
+                    password,
+                    encryption_type,
+                    project_name,
+                    user_id,
+                    db,
+                    expected_output_filename,
+                    db_operation_id
+                )
+                
+            except Exception as e:
+                print(f"[BATCH ERROR] Failed to process carrier file {i+1}: {str(e)}")
+                batch_jobs["failed_files"] += 1
+                batch_jobs["individual_operations"].append({
+                    "operation_id": "failed",
+                    "carrier_filename": carrier_file.filename if hasattr(carrier_file, 'filename') else f"file_{i+1}",
+                    "carrier_type": "unknown",
+                    "status": "failed",
+                    "error": str(e),
+                    "expected_output": None
+                })
+        
+        # Update batch status
+        active_jobs[batch_operation_id]["status"] = "processing"
+        
+        return OperationResponse(
+            success=True,
+            operation_id=batch_operation_id,
+            message=f"Batch embedding started for {len(carrier_files)} files",
+            output_filename=f"batch_{len(carrier_files)}_files"
+        )
+        
+    except Exception as e:
+        if batch_operation_id in active_jobs:
+            active_jobs[batch_operation_id]["status"] = "failed"
+            active_jobs[batch_operation_id]["error"] = str(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/extract", response_model=OperationResponse)
 async def extract_data(
     stego_file: UploadFile = File(...),
@@ -887,18 +1047,49 @@ async def analyze_file(
 
 @app.get("/api/operations/{operation_id}/status", response_model=StatusResponse)
 async def get_operation_status(operation_id: str):
-    """Get status of a steganography operation"""
+    """Get status of a steganography operation (regular or batch)"""
     if operation_id not in active_jobs:
         raise HTTPException(status_code=404, detail="Operation not found")
     
     job = active_jobs[operation_id]
-    return StatusResponse(
-        status=job["status"],
-        progress=job.get("progress"),
-        message=job.get("message"),
-        error=job.get("error"),
-        result=job.get("result")
-    )
+    
+    # Handle batch operations
+    if "batch_id" in job:
+        total_files = job.get("total_files", 0)
+        completed_files = job.get("completed_files", 0)
+        failed_files = job.get("failed_files", 0)
+        
+        # Calculate overall progress
+        progress = 0
+        if total_files > 0:
+            progress = int((completed_files + failed_files) * 100 / total_files)
+        
+        # Create batch-specific result
+        batch_result = {
+            "batch_operation": True,
+            "total_files": total_files,
+            "completed_files": completed_files,
+            "failed_files": failed_files,
+            "output_files": job.get("output_files", []),
+            "individual_operations": job.get("individual_operations", [])
+        }
+        
+        return StatusResponse(
+            status=job["status"],
+            progress=progress,
+            message=f"Processed {completed_files + failed_files}/{total_files} files",
+            error=job.get("error"),
+            result=batch_result
+        )
+    else:
+        # Handle regular operations
+        return StatusResponse(
+            status=job["status"],
+            progress=job.get("progress"),
+            message=job.get("message"),
+            error=job.get("error"),
+            result=job.get("result")
+        )
 
 @app.get("/api/operations/{operation_id}/download")
 async def download_result(operation_id: str):
@@ -946,6 +1137,59 @@ async def download_result(operation_id: str):
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename=\"{filename}\""}
     )
+
+@app.get("/api/operations/{operation_id}/download-batch")
+async def download_batch_result(operation_id: str):
+    """Download all result files from a batch operation as a ZIP archive"""
+    if operation_id not in active_jobs:
+        raise HTTPException(status_code=404, detail="Batch operation not found")
+    
+    job = active_jobs[operation_id]
+    
+    # Check if this is a batch operation
+    if "batch_id" not in job:
+        raise HTTPException(status_code=400, detail="This is not a batch operation")
+    
+    if job["status"] not in ["completed", "completed_with_errors"]:
+        raise HTTPException(status_code=400, detail="Batch operation not completed")
+    
+    output_files = job.get("output_files", [])
+    if not output_files:
+        raise HTTPException(status_code=404, detail="No output files found")
+    
+    # Create a temporary ZIP file
+    zip_filename = f"batch_results_{operation_id[:8]}.zip"
+    zip_path = OUTPUT_DIR / zip_filename
+    
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for i, file_info in enumerate(output_files):
+                output_file_path = file_info["output_path"]
+                if os.path.exists(output_file_path):
+                    # Use original filename or create a numbered filename
+                    archive_filename = file_info["output_filename"]
+                    
+                    # Add file to ZIP with the proper name
+                    zipf.write(output_file_path, archive_filename)
+                    print(f"[BATCH ZIP] Added {archive_filename} to archive")
+                else:
+                    print(f"[BATCH ZIP] Warning: File not found: {output_file_path}")
+        
+        if not os.path.exists(zip_path):
+            raise HTTPException(status_code=500, detail="Failed to create ZIP archive")
+        
+        # Return the ZIP file
+        return FileResponse(
+            zip_path,
+            filename=zip_filename,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=\"{zip_filename}\""}
+        )
+        
+    except Exception as e:
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        raise HTTPException(status_code=500, detail=f"Failed to create ZIP archive: {str(e)}")
 
 @app.delete("/api/operations/{operation_id}")
 async def delete_operation(operation_id: str):
@@ -1321,6 +1565,228 @@ async def process_embed_operation(
                 error_message=error_msg,
                 processing_time=time.time() - start_time
             )
+
+async def process_batch_embed_operation(
+    individual_operation_id: str,
+    batch_operation_id: str,
+    file_index: int,
+    carrier_file_path: str,
+    content_file_path: Optional[str],
+    carrier_type: str,
+    content_type: str,
+    text_content: Optional[str],
+    password: str,
+    encryption_type: str,
+    project_name: Optional[str],
+    user_id: Optional[str],
+    db: Optional[SteganographyDatabase],
+    expected_output_filename: Optional[str] = None,
+    db_operation_id: Optional[str] = None
+):
+    """Background task to process embedding operation for one file in a batch"""
+    
+    import json
+    start_time = time.time()
+    
+    try:
+        print(f"[BATCH] Starting processing for file {file_index + 1} - {individual_operation_id}")
+        
+        # Update batch status
+        if batch_operation_id in active_jobs:
+            active_jobs[batch_operation_id]["individual_operations"][file_index]["status"] = "processing"
+        
+        # Prepare content to hide (same logic as regular embed)
+        if content_type == "text":
+            content_to_hide = text_content
+        else:
+            # Read content from file
+            with open(content_file_path, "rb") as f:
+                content_to_hide = f.read()
+        
+        # Get appropriate steganography manager
+        manager = get_steganography_manager(carrier_type, password)
+        if not manager:
+            raise Exception(f"No manager available for {carrier_type}")
+        
+        # Check if carrier already contains hidden data (same logic as regular embed)
+        existing_data = None
+        original_filename = None
+        try:
+            extraction_result = manager.extract_data(carrier_file_path)
+            
+            if isinstance(extraction_result, tuple):
+                existing_data, original_filename = extraction_result
+            else:
+                existing_data = extraction_result
+                original_filename = None
+            
+            if existing_data:
+                print(f"[BATCH] Found existing data in carrier file {file_index + 1}")
+                
+                # Handle layered containers (same logic as regular embed)
+                if isinstance(existing_data, str):
+                    try:
+                        layered_data = json.loads(existing_data)
+                        if isinstance(layered_data, dict) and layered_data.get("type") == "layered_container":
+                            existing_layers = layered_data.get("layers", [])
+                            print(f"[BATCH] Found {len(existing_layers)} existing layers")
+                            
+                            # Add new layer
+                            if content_type == "text":
+                                new_layer_info = (content_to_hide, "new_message.txt")
+                            else:
+                                new_filename = Path(content_file_path).name if content_file_path else "new_file.bin"
+                                new_layer_info = (content_to_hide, new_filename)
+                            
+                            existing_layers.append(new_layer_info)
+                            layered_container = create_layered_data_container(existing_layers)
+                            
+                            if layered_container:
+                                content_to_hide = layered_container
+                                content_type = "text"
+                                original_filename = None
+                                print(f"[BATCH] Created layered container with {len(existing_layers)} layers")
+                    except json.JSONDecodeError:
+                        pass
+        except Exception as e:
+            print(f"[BATCH] No existing data detected in file {file_index + 1}: {e}")
+            pass
+        
+        # Generate output filename
+        carrier_filename = Path(carrier_file_path).name
+        if expected_output_filename:
+            output_filename = expected_output_filename
+        else:
+            output_filename = generate_unique_filename(carrier_filename, "stego_")
+        output_path = OUTPUT_DIR / output_filename
+        
+        # Perform embedding
+        is_file = content_type == "file"
+        original_filename = None
+        
+        if is_file and content_file_path and Path(content_file_path).exists():
+            original_filename = Path(content_file_path).name
+        
+        print(f"[BATCH] Embedding in file {file_index + 1}: {carrier_type}, is_file: {is_file}")
+        
+        if carrier_type == "video":
+            result = manager.hide_data(
+                carrier_file_path,
+                content_to_hide,
+                str(output_path),
+                is_file,
+                original_filename
+            )
+            success = result.get("success", False)
+            actual_output_path = result.get("output_path", str(output_path))
+        else:
+            import inspect
+            sig = inspect.signature(manager.hide_data)
+            if 'original_filename' in sig.parameters:
+                result = manager.hide_data(
+                    carrier_file_path,
+                    content_to_hide,
+                    str(output_path),
+                    is_file,
+                    original_filename
+                )
+            else:
+                result = manager.hide_data(
+                    carrier_file_path,
+                    content_to_hide,
+                    str(output_path),
+                    is_file
+                )
+            success = result.get("success", False)
+            actual_output_path = result.get("output_path", str(output_path))
+        
+        if not success:
+            error_msg = result.get("error", "Embedding operation failed") if isinstance(result, dict) else "Embedding operation failed"
+            raise Exception(error_msg)
+        
+        # Use actual output path
+        if actual_output_path != str(output_path):
+            output_path = Path(actual_output_path)
+            output_filename = output_path.name
+        
+        # Calculate processing time
+        processing_time = time.time() - start_time
+        
+        # Log completion in database
+        if db and user_id and db_operation_id:
+            message_preview = text_content[:100] if content_type == "text" else f"File: {Path(content_file_path).name if content_file_path else 'unknown'}"
+            db.log_operation_complete(
+                db_operation_id,
+                success=True,
+                output_filename=output_filename,
+                file_size=os.path.getsize(output_path),
+                message_preview=message_preview,
+                processing_time=processing_time
+            )
+        
+        # Update batch tracking
+        if batch_operation_id in active_jobs:
+            active_jobs[batch_operation_id]["completed_files"] += 1
+            active_jobs[batch_operation_id]["individual_operations"][file_index]["status"] = "completed"
+            active_jobs[batch_operation_id]["individual_operations"][file_index]["output_file"] = str(output_path)
+            active_jobs[batch_operation_id]["individual_operations"][file_index]["processing_time"] = processing_time
+            active_jobs[batch_operation_id]["output_files"].append({
+                "original_filename": Path(carrier_file_path).name,
+                "output_filename": output_filename,
+                "output_path": str(output_path),
+                "file_size": os.path.getsize(output_path),
+                "carrier_type": carrier_type
+            })
+            
+            # Check if batch is complete
+            total_files = active_jobs[batch_operation_id]["total_files"]
+            completed_files = active_jobs[batch_operation_id]["completed_files"]
+            failed_files = active_jobs[batch_operation_id]["failed_files"]
+            
+            if completed_files + failed_files >= total_files:
+                if failed_files == 0:
+                    active_jobs[batch_operation_id]["status"] = "completed"
+                else:
+                    active_jobs[batch_operation_id]["status"] = "completed_with_errors"
+                
+                print(f"[BATCH] Batch {batch_operation_id} completed: {completed_files} success, {failed_files} failed")
+        
+        # Cleanup input files for this operation
+        os.remove(carrier_file_path)
+        if content_type == "file" and content_file_path and os.path.exists(content_file_path):
+            os.remove(content_file_path)
+            
+        print(f"[BATCH] Successfully completed file {file_index + 1}")
+            
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[BATCH ERROR] Failed to process file {file_index + 1}: {error_msg}")
+        
+        # Log failure in database
+        if db and user_id and db_operation_id:
+            db.log_operation_complete(
+                db_operation_id,
+                success=False,
+                error_message=error_msg,
+                processing_time=time.time() - start_time
+            )
+        
+        # Update batch tracking
+        if batch_operation_id in active_jobs:
+            active_jobs[batch_operation_id]["failed_files"] += 1
+            active_jobs[batch_operation_id]["individual_operations"][file_index]["status"] = "failed"
+            active_jobs[batch_operation_id]["individual_operations"][file_index]["error"] = error_msg
+            
+            # Check if batch is complete
+            total_files = active_jobs[batch_operation_id]["total_files"]
+            completed_files = active_jobs[batch_operation_id]["completed_files"]
+            failed_files = active_jobs[batch_operation_id]["failed_files"]
+            
+            if completed_files + failed_files >= total_files:
+                if failed_files == total_files:
+                    active_jobs[batch_operation_id]["status"] = "failed"
+                else:
+                    active_jobs[batch_operation_id]["status"] = "completed_with_errors"
 
 async def process_extract_operation(
     operation_id: str,
