@@ -4,12 +4,12 @@ import { Button } from "@/components/ui/button";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Shield, FileCheck, Lock } from "lucide-react";
-import ProjectCreationDialog from "@/components/ProjectCreationDialog";
+
 import { supabase } from "@/integrations/supabase/client";
 
 const ForensicEvidence = () => {
   const navigate = useNavigate();
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
+
 
   useEffect(() => {
     // Check authentication
@@ -35,7 +35,7 @@ const ForensicEvidence = () => {
                 </div>
               </div>
               <div className="flex-1 flex justify-end">
-                <Button onClick={() => setShowCreateDialog(true)} variant="outline">
+                <Button onClick={() => navigate('/general')} variant="outline">
                   <Lock className="mr-2 h-4 w-4" />
                   New Project
                 </Button>
@@ -84,11 +84,6 @@ const ForensicEvidence = () => {
           </div>
         </div>
       </main>
-
-      <ProjectCreationDialog 
-        open={showCreateDialog} 
-        onOpenChange={setShowCreateDialog}
-      />
 
       <Footer />
     </div>

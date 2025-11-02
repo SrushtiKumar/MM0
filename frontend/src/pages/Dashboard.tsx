@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import ProjectCreationDialog from "@/components/ProjectCreationDialog";
+
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -32,7 +32,7 @@ export default function Dashboard() {
   const [selectedTab, setSelectedTab] = useState("projects");
   const [projects, setProjects] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
+
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
@@ -158,7 +158,7 @@ export default function Dashboard() {
               </div>
               
               <div className="animate-fade-in [animation-delay:200ms]">
-                <Button onClick={() => setShowCreateDialog(true)} size="lg" className="btn-primary">
+                <Button onClick={() => navigate('/general')} size="lg" className="btn-primary">
                   <Plus className="mr-2 h-4 w-4" />
                   New Project
                 </Button>
@@ -241,7 +241,7 @@ export default function Dashboard() {
                   <p className="text-muted-foreground mb-6">
                     Create your first project to start protecting your data
                   </p>
-                  <Button onClick={() => setShowCreateDialog(true)} className="btn-primary">
+                  <Button onClick={() => navigate('/general')} className="btn-primary">
                     <Plus className="mr-2 h-4 w-4" />
                     Create Project
                   </Button>
@@ -314,11 +314,6 @@ export default function Dashboard() {
           </div>
         </section>
       </main>
-      
-      <ProjectCreationDialog 
-        open={showCreateDialog} 
-        onOpenChange={setShowCreateDialog}
-      />
       
       <Footer />
     </div>

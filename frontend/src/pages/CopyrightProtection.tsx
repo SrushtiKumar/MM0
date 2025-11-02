@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
-import ProjectCreationDialog from "@/components/ProjectCreationDialog";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
@@ -25,7 +25,7 @@ import {
 
 export default function CopyrightProtection() {
   const navigate = useNavigate();
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
+
 
   useEffect(() => {
     // Scroll to top when component mounts
@@ -46,19 +46,9 @@ export default function CopyrightProtection() {
       description: "Embed invisible copyright information directly into your creative works"
     },
     {
-      icon: <Eye className="h-6 w-6 text-primary" />,
-      title: "Usage Tracking", 
-      description: "Monitor how and where your copyrighted content is being used online"
-    },
-    {
       icon: <Shield className="h-6 w-6 text-primary" />,
       title: "Ownership Proof",
       description: "Generate tamper-proof certificates of ownership and creation timestamps"
-    },
-    {
-      icon: <BarChart3 className="h-6 w-6 text-primary" />,
-      title: "Analytics Dashboard",
-      description: "Track violations, usage patterns, and enforce your digital rights"
     }
   ];
 
@@ -77,11 +67,6 @@ export default function CopyrightProtection() {
       title: "Brand Asset Security",
       description: "Protect logos, marketing materials, and brand assets from misuse",
       icon: <Shield className="h-8 w-8 text-primary" />
-    },
-    {
-      title: "Content Licensing",
-      description: "Manage and track licensed content distribution and compliance",
-      icon: <Users className="h-8 w-8 text-primary" />
     }
   ];
 
@@ -106,7 +91,7 @@ export default function CopyrightProtection() {
                     </p>
                   </div>
                 </div>
-                <Button onClick={() => setShowCreateDialog(true)} variant="outline">
+                <Button onClick={() => navigate('/general')} variant="outline">
                   <Shield className="mr-2 h-4 w-4" />
                   New Project
                 </Button>
@@ -116,10 +101,6 @@ export default function CopyrightProtection() {
                 <Badge variant="secondary" className="flex items-center gap-2">
                   <Copyright className="h-3 w-3" />
                   IP Watermarking
-                </Badge>
-                <Badge variant="secondary" className="flex items-center gap-2">
-                  <Eye className="h-3 w-3" />
-                  Usage Tracking
                 </Badge>
                 <Badge variant="secondary" className="flex items-center gap-2">
                   <Lock className="h-3 w-3" />
@@ -158,7 +139,7 @@ export default function CopyrightProtection() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-4xl mx-auto">
               {features.map((feature, index) => (
                 <Card key={index} className={`animate-fade-in hover:shadow-lg transition-all duration-300`} style={{ animationDelay: `${index * 100}ms` }}>
                   <CardContent className="p-6">
@@ -188,7 +169,7 @@ export default function CopyrightProtection() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
               {useCases.map((useCase, index) => (
                 <Card key={index} className={`animate-fade-in text-center hover:shadow-lg transition-all duration-300`} style={{ animationDelay: `${index * 100}ms` }}>
                   <CardContent className="p-6">
@@ -239,9 +220,9 @@ export default function CopyrightProtection() {
                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
                   <span className="text-2xl font-bold text-primary">3</span>
                 </div>
-                <h3 className="text-xl font-semibold mb-3">Monitor & Enforce</h3>
+                <h3 className="text-xl font-semibold mb-3">Verify</h3>
                 <p className="text-muted-foreground">
-                  Track usage across the internet and receive alerts when unauthorized use is detected
+                  Verify copyright embeddings with proper password to confirm ownership and authenticity
                 </p>
               </div>
             </div>
@@ -249,11 +230,6 @@ export default function CopyrightProtection() {
         </section>
 
       </main>
-      
-      <ProjectCreationDialog 
-        open={showCreateDialog} 
-        onOpenChange={setShowCreateDialog}
-      />
       
       <Footer />
     </div>
