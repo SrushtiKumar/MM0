@@ -12,7 +12,15 @@ import soundfile as sf
 import os
 import json
 import mimetypes
+import struct
 from pathlib import Path
+
+# Cryptography imports for password support
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+import secrets
 
 # Optional dependency for better MIME type detection
 try:
@@ -24,7 +32,8 @@ except ImportError:
 class UniversalFileAudio:
     """Universal file hiding in audio using optimized multi-band embedding"""
     
-    def __init__(self):
+    def __init__(self, password: str = None):
+        self.password = password
         self.redundancy = 2  # Balanced redundancy vs capacity
         self.wavelet = 'db4'
         self.level = 5
@@ -83,15 +92,25 @@ class UniversalFileAudio:
         segment = y[0, :int(y.shape[1] * 0.95)]
         coeffs = pywt.wavedec(segment, self.wavelet, level=self.level)
         
-        total_coeffs = 0
-        for band in self.detail_bands:
-            if band < len(coeffs):
-                total_coeffs += len(coeffs[band])
+        # CRITICAL FIX: Use more realistic capacity calculation
+        target_band = 2 if 2 < len(coeffs) else len(coeffs) - 1
+        band_coeffs = len(coeffs[target_band])
         
-        max_bits = total_coeffs // self.redundancy
+        # Adaptive capacity: use tighter spacing for small files
+        offset = 8  # Skip first few coefficients  
+        available_coeffs = band_coeffs - offset
+        
+        # Use spacing of 2 instead of 4 for better capacity
+        max_bits = available_coeffs // 2  # More aggressive spacing
         max_bytes = max_bits // 8
         
-        return max_bytes, total_coeffs, len(y), sr
+        # Ensure minimum capacity for very small files
+        if max_bytes < 100:
+            # For very small audio, use even tighter packing
+            max_bits = available_coeffs  # 1:1 coefficient to bit ratio
+            max_bytes = max_bits // 8
+        
+        return max_bytes, band_coeffs, len(y), sr
     
     def embed_file(self, audio_path, file_path, output_path, compression_level=6):
         """
@@ -153,8 +172,13 @@ class UniversalFileAudio:
         # Check if it fits
         if len(total_package) > max_bytes:
             if compression_level < 9:
-                print(f"⚠️ File too large, trying higher compression...")
-                return self.embed_file(audio_path, file_path, output_path, compression_level + 2)
+                # Increase compression but ensure it doesn't exceed 9
+                new_compression = min(9, compression_level + 2)
+                if new_compression > compression_level:
+                    print(f"⚠️ File too large, trying higher compression (level {new_compression})...")
+                    return self.embed_file(audio_path, file_path, output_path, new_compression)
+                else:
+                    raise ValueError(f"File too large! Need {self._format_size(len(total_package))}, have {self._format_size(max_bytes)}")
             else:
                 raise ValueError(f"File too large! Need {self._format_size(len(total_package))}, have {self._format_size(max_bytes)}")
         
@@ -174,7 +198,7 @@ class UniversalFileAudio:
         data_bits = ''.join(format(byte, '08b') for byte in total_package)
         print(f"🔢 Embedding {len(total_package)} bytes ({len(data_bits)} bits)")
         
-        # Distribute across bands
+        # Distribute across bands with robust embedding
         bits_per_band = len(data_bits) // len(self.detail_bands)
         remaining_bits = len(data_bits) % len(self.detail_bands)
         
@@ -186,9 +210,10 @@ class UniversalFileAudio:
                 
             detail_band = coeffs[band].copy()
             
-            # Calculate bits for this band
-            band_bits = bits_per_band
-            if band_idx < remaining_bits:
+            # Calculate bits for this band based on coefficient spacing
+            max_bits_this_band = len(detail_band) // 4  # Every 4th coefficient
+            band_bits = min(bits_per_band, max_bits_this_band)
+            if band_idx < remaining_bits and band_bits < max_bits_this_band:
                 band_bits += 1
             
             if bit_index + band_bits > len(data_bits):
@@ -199,21 +224,18 @@ class UniversalFileAudio:
             
             print(f"🔊 Band {band}: {len(detail_band)} coeffs, embedding {len(band_data)} bits")
             
-            # Embed in this band
+            # Embed in this band using robust approach
             for bit_idx, bit_char in enumerate(band_data):
                 bit_val = int(bit_char)
                 
-                for r in range(self.redundancy):
-                    coeff_idx = bit_idx * self.redundancy + r
-                    if coeff_idx < len(detail_band):
-                        original_coeff = detail_band[coeff_idx]
-                        min_magnitude = 0.02  # Increased magnitude for more robust embedding
-                        magnitude = max(abs(original_coeff), min_magnitude)
-                        
-                        if bit_val == 1:
-                            detail_band[coeff_idx] = magnitude
-                        else:
-                            detail_band[coeff_idx] = -magnitude
+                # Use spacing of 4 for robustness
+                coeff_idx = bit_idx * 4
+                if coeff_idx < len(detail_band):
+                    # Use fixed large magnitudes for maximum robustness
+                    if bit_val == 1:
+                        detail_band[coeff_idx] = 1.0   # Strong positive for bit 1
+                    else:
+                        detail_band[coeff_idx] = -1.0  # Strong negative for bit 0
             
             # Update coefficients
             coeffs[band] = detail_band
@@ -273,7 +295,7 @@ class UniversalFileAudio:
         segment = y[0, :int(y.shape[1] * 0.95)]
         coeffs = pywt.wavedec(segment, self.wavelet, level=self.level)
         
-        # Extract bits from all bands
+        # Extract bits from all bands in the same order as embedding
         all_bits = []
         
         for band in self.detail_bands:
@@ -283,21 +305,15 @@ class UniversalFileAudio:
             detail_band = coeffs[band]
             print(f"🔊 Extracting from band {band}: {len(detail_band)} coefficients")
             
-            # Extract with majority voting
-            max_bits_this_band = len(detail_band) // self.redundancy
+            # Extract using robust approach with simple threshold  
+            max_bits_this_band = len(detail_band) // 4  # Match the spacing used in embedding
             
             for bit_idx in range(max_bits_this_band):
-                votes = []
-                for r in range(self.redundancy):
-                    coeff_idx = bit_idx * self.redundancy + r
-                    if coeff_idx < len(detail_band):
-                        coeff = detail_band[coeff_idx]
-                        # Use a more robust threshold
-                        vote = 1 if coeff > 0.01 else 0
-                        votes.append(vote)
-                
-                if votes:
-                    bit_value = 1 if sum(votes) > len(votes) // 2 else 0
+                coeff_idx = bit_idx * 4  # Every 4th coefficient to match embedding
+                if coeff_idx < len(detail_band):
+                    coeff = detail_band[coeff_idx]
+                    # Simple positive/negative threshold extraction
+                    bit_value = 1 if coeff > 0 else 0
                     all_bits.append(str(bit_value))
         
         print(f"📊 Total extracted bits: {len(all_bits)}")
@@ -319,44 +335,56 @@ class UniversalFileAudio:
         if len(extracted_bytes) < 4:
             raise ValueError("Not enough data extracted")
         
-        # Parse header
-        header_length = int.from_bytes(bytes(extracted_bytes[:4]), 'little')
-        print(f"[DEBUG] Header length from bytes: {header_length}")
+        # Check for magic header first
+        magic_header = b"UNIVERSAL_FILE_AUDIO"
+        magic_found = False
+        start_offset = 0
+        
+        # Look for magic header in first few bytes
+        for offset in range(min(100, len(extracted_bytes) - len(magic_header))):
+            test_magic = bytes(extracted_bytes[offset:offset + len(magic_header)])
+            if test_magic == magic_header:
+                print(f"✅ Magic header found at offset {offset}")
+                start_offset = offset
+                magic_found = True
+                break
+        
+        if not magic_found:
+            raise ValueError("Magic header not found")
+        
+        # Parse header length from correct position
+        header_length_offset = start_offset + len(magic_header)
+        header_length = int.from_bytes(bytes(extracted_bytes[header_length_offset:header_length_offset+4]), 'little')
+        print(f"📋 Header length: {header_length}")
         
         if header_length <= 0 or header_length > 1000:
             raise ValueError(f"Invalid header length: {header_length}")
         
-        if len(extracted_bytes) < 4 + header_length:
+        # Extract header
+        header_start = header_length_offset + 4
+        header_end = header_start + header_length
+        
+        if len(extracted_bytes) < header_end:
             raise ValueError("Not enough bytes for header")
         
-        header_bytes = bytes(extracted_bytes[4:4+header_length])
-        print(f"[DEBUG] Header bytes (first 20): {header_bytes[:20]}")
-        print(f"[DEBUG] Header length: {header_length}")
+        header_bytes = bytes(extracted_bytes[header_start:header_end])
         
         try:
             header_str = header_bytes.decode('utf-8')
-            print(f"[DEBUG] Header string: {header_str[:100]}...")
             header = json.loads(header_str)
-        except UnicodeDecodeError as e:
-            print(f"[ERROR] Unicode decode error: {e}")
-            print(f"[DEBUG] Raw bytes: {header_bytes}")
-            # Try latin-1 encoding as fallback
-            try:
-                header_str = header_bytes.decode('latin-1')
-                header = json.loads(header_str)
-                print(f"[DEBUG] Successfully decoded with latin-1")
-            except Exception as e2:
-                print(f"[ERROR] Latin-1 also failed: {e2}")
-                raise ValueError(f"Cannot decode header: {e}")
+            print(f"📋 Header parsed successfully")
+        except Exception as e:
+            print(f"[ERROR] Header parsing failed: {e}")
+            raise ValueError(f"Cannot decode header: {e}")
         
         print(f"📋 Header: {header}")
         
         if header.get('magic') != 'UNIVERSAL_FILE_AUDIO':
             raise ValueError("Not a valid universal file-audio file")
         
-        # Extract compressed data
+        # Extract compressed data from corrected position
         compressed_size = header['compressed_size']
-        data_start = 4 + header_length
+        data_start = header_end
         data_end = data_start + compressed_size
         
         if len(extracted_bytes) < data_end:
@@ -401,6 +429,360 @@ class UniversalFileAudio:
         print(f"💾 Saved to: {output_path}")
         
         return output_path
+    
+    def _encrypt_data(self, data: bytes) -> bytes:
+        """Encrypt data using AES-GCM"""
+        salt = secrets.token_bytes(16)
+        nonce = secrets.token_bytes(12)
+        
+        # Derive key
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        key = kdf.derive(self.password.encode())
+        
+        # Encrypt
+        aesgcm = AESGCM(key)
+        ciphertext = aesgcm.encrypt(nonce, data, None)
+        
+        return salt + nonce + ciphertext
+    
+    def _decrypt_data(self, encrypted_data: bytes) -> bytes:
+        """Decrypt data using AES-GCM"""
+        if len(encrypted_data) < 28:
+            raise ValueError(f"Encrypted data too short: {len(encrypted_data)} bytes, need at least 28")
+        
+        salt = encrypted_data[:16]
+        nonce = encrypted_data[16:28]
+        ciphertext = encrypted_data[28:]
+        
+        # Derive key
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        key = kdf.derive(self.password.encode())
+        
+        # Decrypt
+        aesgcm = AESGCM(key)
+        return aesgcm.decrypt(nonce, ciphertext, None)
+    
+    def hide_data(self, carrier_file_path: str, content_to_hide, output_path: str, is_file: bool = False, original_filename: str = None, **kwargs):
+        """Simplified hide data method using robust single-band DWT approach"""
+        try:
+            print(f"[SIMPLE AUDIO] Hiding data in {carrier_file_path}")
+            
+            # Prepare content
+            if is_file:
+                if isinstance(content_to_hide, str):
+                    raw_data = content_to_hide.encode('utf-8')
+                else:
+                    raw_data = content_to_hide
+            else:
+                text_data = str(content_to_hide)
+                raw_data = text_data.encode('utf-8')
+            
+            print(f"[SIMPLE AUDIO] Raw data: {len(raw_data)} bytes")
+            
+            # Check capacity
+            max_bytes, _, _, _ = self._get_audio_capacity(carrier_file_path)
+            
+            # Create simple header: magic(6) + data_length(4) + encrypted_data
+            magic = b'SAUDIO'
+            
+            # Encrypt if password provided
+            if self.password:
+                encrypted_data = self._encrypt_data(raw_data)
+                final_data = encrypted_data
+                print(f"[SIMPLE AUDIO] Encrypted data: {len(final_data)} bytes")
+            else:
+                final_data = raw_data
+                print(f"[SIMPLE AUDIO] Unencrypted data: {len(final_data)} bytes")
+            
+            # Create minimal payload: magic + length + data
+            data_length = struct.pack('<I', len(final_data))
+            payload = magic + data_length + final_data
+            
+            print(f"[SIMPLE AUDIO] Total payload: {len(payload)} bytes")
+            print(f"[SIMPLE AUDIO] Available capacity: {max_bytes} bytes")
+            
+            if len(payload) > max_bytes:
+                return {
+                    'success': False,
+                    'error': f'Data too large: need {len(payload)} bytes, have {max_bytes} bytes'
+                }
+            
+            # Load and process audio
+            y, sr = librosa.load(carrier_file_path, sr=None)
+            if len(y.shape) == 1:
+                y = y.reshape(1, -1)
+            
+            # CRITICAL FIX: Skip the beginning of audio to prevent audible noise
+            # Use middle portion of audio for embedding to preserve music quality
+            audio_length = y.shape[1]
+            start_skip = int(audio_length * 0.1)  # Skip first 10%
+            end_skip = int(audio_length * 0.1)    # Skip last 10%
+            
+            # Work with middle 80% of audio
+            segment_start = start_skip
+            segment_end = audio_length - end_skip
+            segment = y[0, segment_start:segment_end]
+            
+            # Apply DWT to the middle segment only
+            coeffs = pywt.wavedec(segment, self.wavelet, level=self.level)
+            
+            target_band = 2 if 2 < len(coeffs) else len(coeffs) - 1
+            detail_band = coeffs[target_band].copy()
+            
+            # Convert payload to bits
+            data_bits = ''.join(format(byte, '08b') for byte in payload)
+            print(f"[SIMPLE AUDIO] Embedding {len(data_bits)} bits in band {target_band} (middle segment)")
+            
+            # CRITICAL FIX: Use adaptive spacing based on available space
+            offset = 8   # Skip first few coefficients
+            available_coeffs = len(detail_band) - offset
+            
+            # Calculate required spacing - use minimum possible
+            min_spacing = max(1, available_coeffs // len(data_bits))
+            spacing = min(4, min_spacing)  # Prefer 4 but use less if needed
+            
+            print(f"📊 Adaptive spacing: {spacing} (available: {available_coeffs}, needed: {len(data_bits)})")
+            
+            # Check if we have enough space
+            required_coeffs = len(data_bits) * spacing + offset
+            if required_coeffs > len(detail_band):
+                raise ValueError(f"Insufficient capacity: need {required_coeffs} coefficients, have {len(detail_band)}")
+            
+            for bit_idx, bit_char in enumerate(data_bits):
+                bit_val = int(bit_char)
+                coeff_idx = offset + (bit_idx * spacing)
+                
+                if coeff_idx < len(detail_band):
+                    # RELIABLE FIX: Use consistent magnitude-based embedding for reliable extraction
+                    current_coeff = detail_band[coeff_idx]
+                    
+                    # Set a consistent magnitude that's detectable but not too large
+                    base_magnitude = max(0.05, abs(current_coeff) * 0.3)
+                    
+                    # Clear embedding: positive for 1, negative for 0
+                    if bit_val == 1:
+                        detail_band[coeff_idx] = base_magnitude
+                    else:
+                        detail_band[coeff_idx] = -base_magnitude
+            
+            # Update coefficients and reconstruct the segment
+            coeffs[target_band] = detail_band
+            y_modified_segment = pywt.waverec(coeffs, self.wavelet)
+            
+            # Ensure same length as original segment
+            if len(y_modified_segment) != len(segment):
+                if len(y_modified_segment) > len(segment):
+                    y_modified_segment = y_modified_segment[:len(segment)]
+                else:
+                    padding = np.zeros(len(segment) - len(y_modified_segment))
+                    y_modified_segment = np.concatenate([y_modified_segment, padding])
+            
+            # CRITICAL: Replace only the middle segment, preserve beginning and end
+            y_out = y.copy()
+            y_out[0, segment_start:segment_start + len(y_modified_segment)] = y_modified_segment
+            
+            # Save output
+            audio_out = y_out[0] if y_out.shape[0] == 1 else y_out.T
+            sf.write(output_path, audio_out, sr)
+            
+            print(f"[SIMPLE AUDIO] Successfully embedded data in {output_path}")
+            
+            return {
+                'success': True,
+                'output_path': output_path,
+                'details': {
+                    'data_size': len(raw_data),
+                    'payload_size': len(payload),
+                    'capacity_used': f"{len(payload)/max_bytes*100:.1f}%"
+                }
+            }
+            
+        except Exception as e:
+            print(f"[SIMPLE AUDIO] Error: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def extract_data(self, stego_file_path: str, output_dir: str = None):
+        """Simplified extract data method using robust single-band DWT approach"""
+        try:
+            print(f"[SIMPLE AUDIO] Extracting from {stego_file_path}")
+            
+            # Load audio - match embedding segment selection
+            y, sr = librosa.load(stego_file_path, sr=None)
+            if len(y.shape) == 1:
+                y = y.reshape(1, -1)
+            
+            # Use same middle segment as embedding
+            audio_length = y.shape[1]
+            start_skip = int(audio_length * 0.1)  # Skip first 10%
+            end_skip = int(audio_length * 0.1)    # Skip last 10%
+            
+            segment_start = start_skip
+            segment_end = audio_length - end_skip
+            segment = y[0, segment_start:segment_end]
+            
+            coeffs = pywt.wavedec(segment, self.wavelet, level=self.level)
+            
+            target_band = 2 if 2 < len(coeffs) else len(coeffs) - 1
+            detail_band = coeffs[target_band]
+            
+            print(f"[SIMPLE AUDIO] Extracting from band {target_band} (middle segment)")
+            
+            # Extract bits - match embedding strategy
+            extracted_bits = []
+            offset = 8  # Same offset used in embedding
+            
+            # Calculate spacing (same as embedding)
+            usable_coeffs = len(detail_band) - 16
+            
+            # CRITICAL FIX: Try multiple spacing values to find the right one
+            magic_found = False
+            
+            for spacing in [2, 4, 1]:  # Try different spacing values
+                extracted_bits = []
+                
+                print(f"[SIMPLE AUDIO] Trying spacing {spacing} for extraction")
+                
+                # Extract bits using simple coefficient sign method
+                max_bits = (len(detail_band) - offset) // spacing
+                for bit_idx in range(max_bits):
+                    coeff_idx = offset + (bit_idx * spacing)
+                    if coeff_idx < len(detail_band):
+                        coeff = detail_band[coeff_idx]
+                        # Simple extraction: positive = 1, negative = 0
+                        bit_value = 1 if coeff > 0 else 0
+                        extracted_bits.append(str(bit_value))
+                
+                # Test if this produces valid magic header
+                if len(extracted_bits) >= 48:  # Need at least 6 bytes for magic
+                    test_bytes = []
+                    for i in range(0, 48, 8):
+                        if i + 7 < len(extracted_bits):
+                            byte_bits = ''.join(extracted_bits[i:i+8])
+                            test_bytes.append(int(byte_bits, 2))
+                    
+                    if len(test_bytes) >= 6 and bytes(test_bytes[:6]) == b'SAUDIO':
+                        print(f"[SIMPLE AUDIO] Found valid magic with spacing {spacing}")
+                        magic_found = True
+                        break
+            
+            if not magic_found:
+                print(f"[SIMPLE AUDIO] No valid magic header found with any spacing")
+            
+            # Convert to bytes
+            extracted_bytes = []
+            for i in range(0, len(extracted_bits), 8):
+                if i + 7 < len(extracted_bits):
+                    byte_bits = ''.join(extracted_bits[i:i+8])
+                    byte_val = int(byte_bits, 2)
+                    extracted_bytes.append(byte_val)
+            
+            if len(extracted_bytes) < 10:  # Need at least magic + length
+                print(f"[SIMPLE AUDIO] Not enough data extracted: {len(extracted_bytes)} bytes")
+                return None
+            
+            # Check magic header
+            magic = bytes(extracted_bytes[:6])
+            if magic != b'SAUDIO':
+                print(f"[SIMPLE AUDIO] Invalid magic header: {magic}")
+                return None
+            
+            # Get data length
+            data_length = struct.unpack('<I', bytes(extracted_bytes[6:10]))[0]
+            print(f"[SIMPLE AUDIO] Data length: {data_length} bytes")
+            
+            if len(extracted_bytes) < 10 + data_length:
+                print(f"[SIMPLE AUDIO] Not enough data: need {10 + data_length}, have {len(extracted_bytes)}")
+                return None
+            
+            # Extract the actual data
+            data_bytes = bytes(extracted_bytes[10:10+data_length])
+            
+            # Decrypt if password was used
+            if self.password:
+                try:
+                    final_data = self._decrypt_data(data_bytes)
+                    print(f"[SIMPLE AUDIO] Decrypted successfully")
+                except Exception as e:
+                    print(f"[SIMPLE AUDIO] Decryption failed: {e}")
+                    return None
+            else:
+                final_data = data_bytes
+            
+            # CRITICAL FIX: Enhanced file format detection to preserve original extensions
+            # Detect file format from binary content to return proper filename
+            
+            detected_filename = self._detect_file_format(final_data)
+            
+            # Always return binary content to preserve exact original format
+            return (final_data, detected_filename)
+                
+        except Exception as e:
+            print(f"[SIMPLE AUDIO] Extraction error: {e}")
+            return None
+    
+    def _detect_file_format(self, data: bytes) -> str:
+        """Detect file format from binary signature and return appropriate filename"""
+        
+        if not data:
+            return 'extracted_data.bin'
+        
+        # Check for common file signatures
+        if data.startswith(b'ID3') or data.startswith(b'\xff\xfb') or data.startswith(b'\xff\xf3') or data.startswith(b'\xff\xf2'):
+            return 'extracted_audio.mp3'
+        elif data.startswith(b'RIFF') and b'WAVE' in data[:20]:
+            return 'extracted_audio.wav'
+        elif data.startswith(b'fLaC'):
+            return 'extracted_audio.flac'
+        elif data.startswith(b'OggS'):
+            return 'extracted_audio.ogg'
+        # Image formats
+        elif data.startswith(b'\xff\xd8\xff'):
+            return 'extracted_image.jpg'
+        elif data.startswith(b'\x89PNG\r\n\x1a\n'):
+            return 'extracted_image.png'
+        elif data.startswith(b'GIF8'):
+            return 'extracted_image.gif'
+        # Video formats
+        elif data.startswith(b'\x00\x00\x00\x14ftyp') or data.startswith(b'\x00\x00\x00\x18ftyp') or data.startswith(b'\x00\x00\x00\x1cftyp') or data.startswith(b'\x00\x00\x00\x20ftyp'):
+            return 'extracted_video.mp4'
+        elif data.startswith(b'RIFF') and b'AVI ' in data[:20]:
+            return 'extracted_video.avi'
+        # Document formats  
+        elif data.startswith(b'%PDF'):
+            return 'extracted_document.pdf'
+        elif data.startswith(b'PK\x03\x04') and b'word/' in data[:1000]:
+            return 'extracted_document.docx'
+        elif data.startswith(b'PK\x03\x04') and b'xl/' in data[:1000]:
+            return 'extracted_document.xlsx'
+        elif data.startswith(b'PK'):
+            return 'extracted_archive.zip'
+        # Text formats - check if it's valid UTF-8 text
+        else:
+            try:
+                text_content = data.decode('utf-8')
+                # Check if it looks like reasonable text (printable characters)
+                if len(text_content) > 0 and all(c.isprintable() or c.isspace() for c in text_content[:100]):
+                    return 'extracted_text.txt'
+            except UnicodeDecodeError:
+                pass
+        
+        # Default fallback
+        return 'extracted_data.bin'
 
 def test_universal_file_steganography():
     """Test hiding various file types in audio"""

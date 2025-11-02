@@ -29,43 +29,46 @@ import uvicorn
 # Import steganography modules with fallbacks
 steganography_managers = {}
 
+# Video Steganography - Try existing modules
 try:
-    from enhanced_web_video_stego import EnhancedWebVideoSteganographyManager
-    steganography_managers['video'] = EnhancedWebVideoSteganographyManager
-    print("[OK] Video steganography module loaded")
-except ImportError as e:
-    print(f"[ERROR] Video steganography module not available: {e}")
-    steganography_managers['video'] = None
+    from final_video_steganography import FinalVideoSteganographyManager
+    steganography_managers['video'] = FinalVideoSteganographyManager
+    print("[OK] Final Video steganography module loaded")
+except ImportError:
+    try:
+        from video_steganography import VideoSteganographyManager
+        steganography_managers['video'] = VideoSteganographyManager
+        print("[OK] Video steganography module loaded")
+    except ImportError as e:
+        print(f"[ERROR] Video steganography module not available: {e}")
+        steganography_managers['video'] = None
 
+# Image Steganography - Use universal file steganography
 try:
-    from enhanced_web_image_stego import EnhancedWebImageSteganographyManager
-    steganography_managers['image'] = EnhancedWebImageSteganographyManager
-    print("[OK] Image steganography module loaded")
+    from universal_file_steganography import UniversalFileSteganography
+    steganography_managers['image'] = UniversalFileSteganography
+    print("[OK] Universal file steganography module loaded for images")
 except ImportError as e:
     print(f"[ERROR] Image steganography module not available: {e}")
     steganography_managers['image'] = None
 
+# Document Steganography - Use universal file steganography  
 try:
-    from enhanced_web_document_stego import EnhancedWebDocumentSteganographyManager
-    steganography_managers['document'] = EnhancedWebDocumentSteganographyManager
-    print("[OK] Document steganography module loaded")
+    from universal_file_steganography import UniversalFileSteganography
+    steganography_managers['document'] = UniversalFileSteganography
+    print("[OK] Universal file steganography module loaded for documents")
 except ImportError as e:
     print(f"[ERROR] Document steganography module not available: {e}")
     steganography_managers['document'] = None
 
+# Audio Steganography - Use working module
 try:
-    from safe_enhanced_web_audio_stego import SafeEnhancedWebAudioSteganographyManager
-    steganography_managers['audio'] = SafeEnhancedWebAudioSteganographyManager
-    print("[OK] Safe Audio steganography module loaded")
+    from universal_file_audio import UniversalFileAudio
+    steganography_managers['audio'] = UniversalFileAudio
+    print("[OK] Universal file audio steganography module loaded")
 except ImportError as e:
-    print(f"[ERROR] Safe Audio steganography module not available: {e}")
-    try:
-        from enhanced_web_audio_stego import EnhancedWebAudioSteganographyManager
-        steganography_managers['audio'] = EnhancedWebAudioSteganographyManager
-        print("[OK] Fallback Audio steganography module loaded")
-    except ImportError as e2:
-        print(f"[ERROR] Audio steganography module not available: {e2}")
-        steganography_managers['audio'] = None
+    print(f"[ERROR] Audio steganography module not available: {e}")
+    steganography_managers['audio'] = None
 
 # Import Supabase service with fallback
 database_available = False
@@ -457,7 +460,16 @@ def get_steganography_manager(carrier_type: str, password: str = ""):
         return None
     
     try:
-        return steganography_managers[carrier_type](password=password)
+        manager_class = steganography_managers[carrier_type]
+        
+        # Handle different initialization patterns for different managers
+        if carrier_type == "audio":
+            # UniversalFileAudio now takes password in __init__
+            return manager_class(password=password)
+        else:
+            # Other managers take password in __init__
+            return manager_class(password=password)
+            
     except Exception as e:
         print(f"Error creating {carrier_type} manager: {e}")
         return None
@@ -666,16 +678,27 @@ async def embed_data(
                 content = await content_file.read()
                 f.write(content)
         
-        # Log operation start in database
+        # Log operation start in database - completely optional, don't let it fail the main operation
         db_operation_id = None
-        if db and user_id:
-            db_operation_id = db.log_operation_start(
-                user_id=user_id,
-                operation_type="hide",
-                media_type=carrier_type,
-                original_filename=carrier_file.filename,
-                password=password
-            )
+        if db:
+            try:
+                # Only attempt database logging if we have a valid user_id
+                # If user_id is invalid or missing, just skip database logging entirely
+                if user_id and user_id.strip():
+                    db_operation_id = db.log_operation_start(
+                        user_id=user_id,
+                        operation_type="hide",
+                        media_type=carrier_type,
+                        original_filename=carrier_file.filename,
+                        password=password
+                    )
+                else:
+                    print(f"[INFO] Skipping database logging - no valid user_id provided")
+                        
+            except Exception as e:
+                # Database logging is completely optional - continue without it
+                print(f"[INFO] Database logging failed, continuing without it: {e}")
+                db_operation_id = None
         
         # Start background processing with file paths instead of UploadFile objects
         # Generate output filename early so we can return it in the response
@@ -914,16 +937,27 @@ async def extract_data(
             content = await stego_file.read()
             f.write(content)
         
-        # Log operation start in database
+        # Log operation start in database - completely optional, don't let it fail the main operation
         db_operation_id = None
-        if db and user_id:
-            db_operation_id = db.log_operation_start(
-                user_id=user_id,
-                operation_type="extract",
-                media_type=carrier_type,
-                original_filename=stego_file.filename,
-                password=password
-            )
+        if db:
+            try:
+                # Only attempt database logging if we have a valid user_id
+                # If user_id is invalid or missing, just skip database logging entirely
+                if user_id and user_id.strip():
+                    db_operation_id = db.log_operation_start(
+                        user_id=user_id,
+                        operation_type="extract",
+                        media_type=carrier_type,
+                        original_filename=stego_file.filename,
+                        password=password
+                    )
+                else:
+                    print(f"[INFO] Skipping database logging - no valid user_id provided")
+                        
+            except Exception as e:
+                # Database logging is completely optional - continue without it
+                print(f"[INFO] Database logging failed, continuing without it: {e}")
+                db_operation_id = None
         
         # Start background processing with file path instead of UploadFile
         background_tasks.add_task(
@@ -1257,7 +1291,8 @@ async def process_embed_operation(
         existing_data = None
         original_filename = None
         try:
-            # Try to extract existing data
+            print(f"[EMBED] Checking if carrier file already contains hidden data...")
+            # Try to extract existing data (this will show extraction logs but failure is normal for clean files)
             extraction_result = manager.extract_data(carrier_file_path)
             
             # Handle tuple return (data, filename) from some managers
@@ -1269,7 +1304,7 @@ async def process_embed_operation(
             
             # Check if we found meaningful existing data
             if existing_data:
-                print(f"[EMBED] Found existing data: type={type(existing_data)}, size={len(existing_data) if hasattr(existing_data, '__len__') else 'unknown'}")
+                print(f"[EMBED] ✅ Found existing data: type={type(existing_data)}, size={len(existing_data) if hasattr(existing_data, '__len__') else 'unknown'}")
                 
                 # Check if existing data is already a layered container
                 is_existing_layered = False
@@ -1417,34 +1452,43 @@ async def process_embed_operation(
                         print(f"[EMBED ERROR] Traceback: {traceback.format_exc()}")
                         new_layer_info = (content_to_hide, "error_recovery.bin")
                     
-                    # Add new layer to existing layers only if valid
+                    # Add new layer to existing layers only if valid AND we have enough capacity
                     if new_layer_info is not None and existing_layers is not None:
-                        existing_layers.append(new_layer_info)
-                        update_job_status(operation_id, "processing", 48, f"Added new content as layer {len(existing_layers)}: {new_layer_info[1]}")
+                        # CAPACITY CHECK: For document steganography with small containers, 
+                        # skip layered containers due to JSON overhead
+                        carrier_size = os.path.getsize(carrier_file_path) if os.path.exists(carrier_file_path) else 0
+                        is_small_container = carrier_size < 1000  # Less than 1KB
+                        is_document = carrier_type == "document"
                         
-                        # Create layered container with all layers
-                        try:
-                            layered_container = create_layered_data_container(existing_layers)
-                            if layered_container is not None:
-                                # Replace content with layered container (as string since it's JSON)
-                                content_to_hide = layered_container
-                                # Update content type since we're now embedding JSON text, not the original file
-                                content_type = "text"
-                                original_filename = None
-                                
-                                update_job_status(operation_id, "processing", 49, f"Created layered container with {len(existing_layers)} layers")
-                                print(f"[EMBED] Successfully created layered container with {len(existing_layers)} layers")
-                            else:
-                                print("[EMBED ERROR] create_layered_data_container returned None, falling back to normal embedding")
-                        except Exception as e:
-                            print(f"[EMBED ERROR] Failed to create layered container: {e}, falling back to normal embedding")
-                    else:
-                        print(f"[EMBED ERROR] Invalid layer data: new_layer_info={new_layer_info}, existing_layers={existing_layers}, falling back to normal embedding")
+                        if is_small_container and is_document:
+                            print(f"[EMBED] CAPACITY OPTIMIZATION: Skipping layered container for small document ({carrier_size} bytes)")
+                            print(f"[EMBED] Using direct embedding to avoid JSON overhead")
+                            update_job_status(operation_id, "processing", 48, f"Using direct embedding for small document")
+                        else:
+                            existing_layers.append(new_layer_info)
+                            update_job_status(operation_id, "processing", 48, f"Added new content as layer {len(existing_layers)}: {new_layer_info[1]}")
+                            
+                            # Create layered container with all layers
+                            try:
+                                layered_container = create_layered_data_container(existing_layers)
+                                if layered_container is not None:
+                                    # Replace content with layered container (as string since it's JSON)
+                                    content_to_hide = layered_container
+                                    # Update content type since we're now embedding JSON text, not the original file
+                                    content_type = "text"
+                                    original_filename = None
+                                    
+                                    update_job_status(operation_id, "processing", 49, f"Created layered container with {len(existing_layers)} layers")
+                                    print(f"[EMBED] Successfully created layered container with {len(existing_layers)} layers")
+                                else:
+                                    print("[EMBED ERROR] create_layered_data_container returned None, falling back to normal embedding")
+                            except Exception as e:
+                                print(f"[EMBED ERROR] Failed to create layered container: {e}, falling back to normal embedding")
                     
         except Exception as e:
-            # If extraction fails, it likely means no hidden data exists
-            update_job_status(operation_id, "processing", 42, f"No existing data found or extraction failed: {str(e)}")
-            print(f"[EMBED] No existing data detected: {e}")
+            # If extraction fails, it means no hidden data exists (this is normal for clean files)
+            update_job_status(operation_id, "processing", 42, "No existing data found - ready for fresh embedding")
+            print(f"[EMBED] ✅ No existing data detected (normal for clean files) - proceeding with fresh embedding")
             # Continue with normal embedding
             pass
         
@@ -1476,23 +1520,38 @@ async def process_embed_operation(
         
         if carrier_type == "video":
             # Video manager returns a dict result
-            result = manager.hide_data(
-                carrier_file_path,
-                content_to_hide,
-                str(output_path),
-                is_file,
-                original_filename
-            )
-            success = result.get("success", False)
-            # Get actual output path from result if available
-            actual_output_path = result.get("output_path", str(output_path))
+            try:
+                print(f"[DEBUG VIDEO] About to call video manager.hide_data")
+                print(f"[DEBUG VIDEO] Parameters: video_path={carrier_file_path}, output_path={str(output_path)}")
+                manager_result = manager.hide_data(
+                    carrier_file_path,
+                    content_to_hide,
+                    str(output_path),
+                    password,
+                    is_file,
+                    original_filename
+                )
+                print(f"[DEBUG VIDEO] Video manager returned: {manager_result}")
+                success = manager_result.get("success", False)
+                # Get actual output path from result if available
+                actual_output_path = manager_result.get("output_path", str(output_path))
+                print(f"[DEBUG VIDEO] Expected path: {output_path}")
+                print(f"[DEBUG VIDEO] Video result output_path: {manager_result.get('output_path')}")
+                print(f"[DEBUG VIDEO] Actual output path: {actual_output_path}")
+                print(f"[DEBUG VIDEO] File exists check: {os.path.exists(actual_output_path)}")
+            except Exception as e:
+                print(f"[DEBUG VIDEO] Exception in video manager: {e}")
+                print(f"[DEBUG VIDEO] Exception type: {type(e)}")
+                import traceback
+                traceback.print_exc()
+                raise
         else:
             # Other managers (image, audio, document) return dict results too
             # Check if manager supports original_filename parameter
             import inspect
             sig = inspect.signature(manager.hide_data)
             if 'original_filename' in sig.parameters:
-                result = manager.hide_data(
+                manager_result = manager.hide_data(
                     carrier_file_path,
                     content_to_hide,
                     str(output_path),
@@ -1500,18 +1559,18 @@ async def process_embed_operation(
                     original_filename
                 )
             else:
-                result = manager.hide_data(
+                manager_result = manager.hide_data(
                     carrier_file_path,
                     content_to_hide,
                     str(output_path),
                     is_file
                 )
-            success = result.get("success", False)
+            success = manager_result.get("success", False)
             # Get actual output path from result if available
-            actual_output_path = result.get("output_path", str(output_path))
+            actual_output_path = manager_result.get("output_path", str(output_path))
         
         if not success:
-            error_msg = result.get("error", "Embedding operation failed") if isinstance(result, dict) else "Embedding operation failed"
+            error_msg = manager_result.get("error", "Embedding operation failed") if isinstance(manager_result, dict) else "Embedding operation failed"
             raise Exception(error_msg)
         
         # Use actual output path instead of expected path
@@ -1545,6 +1604,13 @@ async def process_embed_operation(
             "carrier_type": carrier_type,
             "content_type": content_type
         }
+        
+        # Add format-specific warnings for video files
+        if carrier_type == "video" and 'manager_result' in locals() and isinstance(manager_result, dict):
+            if manager_result.get('video_format') == 'AVI':
+                result["format_warning"] = "AVI format detected - audio may not play properly. Consider using MP4 format for better compatibility."
+            elif manager_result.get('compatibility_warning'):
+                result["format_warning"] = manager_result['compatibility_warning']
         
         update_job_status(operation_id, "completed", 100, "Embedding completed successfully", result=result)
         
@@ -1811,7 +1877,15 @@ async def process_extract_operation(
             raise Exception(f"No manager available for {carrier_type}")
         
         # Extract data
+        print(f"[DEBUG EXTRACT] About to call manager.extract_data for {carrier_type}")
+        print(f"[DEBUG EXTRACT] Password received: {repr(password)}")
+        if hasattr(manager, 'safe_stego') and hasattr(manager.safe_stego, 'password'):
+            print(f"[DEBUG EXTRACT] Manager password set to: {repr(manager.safe_stego.password)}")
         extraction_result = manager.extract_data(stego_file_path)
+        
+        # DEBUG: Log extraction result details
+        print(f"[DEBUG EXTRACT] extraction_result type: {type(extraction_result)}")
+        print(f"[DEBUG EXTRACT] extraction_result: {repr(extraction_result)[:200]}")
         
         if extraction_result is None or (isinstance(extraction_result, tuple) and extraction_result[0] is None):
             raise Exception("Extraction failed - wrong password or no hidden data")
@@ -1819,9 +1893,11 @@ async def process_extract_operation(
         # Handle tuple return (data, filename) from managers
         if isinstance(extraction_result, tuple):
             extracted_data, original_filename = extraction_result
+            print(f"[DEBUG EXTRACT] Tuple unpacked - data type: {type(extracted_data)}, filename: {original_filename}")
         else:
             extracted_data = extraction_result
             original_filename = None
+            print(f"[DEBUG EXTRACT] Non-tuple result - data type: {type(extracted_data)}")
         
         update_job_status(operation_id, "processing", 70, "Checking for layered data")
         
@@ -1829,14 +1905,17 @@ async def process_extract_operation(
         is_layered_data = False
         if isinstance(extracted_data, str):
             is_layered_data = is_layered_container(extracted_data)
+            print(f"[DEBUG EXTRACT] String data - layered: {is_layered_data}")
         elif isinstance(extracted_data, bytes):
             try:
                 decoded_data = extracted_data.decode('utf-8')
                 is_layered_data = is_layered_container(decoded_data)
                 if is_layered_data:
                     extracted_data = decoded_data
+                    print(f"[DEBUG EXTRACT] Converted bytes to string for layered container")
             except UnicodeDecodeError:
                 is_layered_data = False
+                print(f"[DEBUG EXTRACT] Bytes data - not UTF-8 decodable, not layered")
         
         if is_layered_data:
             update_job_status(operation_id, "processing", 75, "Extracting multiple layers")
@@ -1914,11 +1993,17 @@ async def process_extract_operation(
                 import re
                 output_filename = re.sub(r'[<>:"/\\|?*]', '_', output_filename)
                 
-                # Ensure we have a valid filename
+                # Ensure we have a valid filename with proper extension
                 if not output_filename or output_filename.startswith('.') or len(output_filename.strip()) == 0:
                     # Extract extension from original filename if possible
                     original_ext = Path(original_filename).suffix if original_filename else ".bin"
                     output_filename = f"extracted_file_{int(time.time())}{original_ext}"
+                elif '.' not in output_filename:
+                    # If filename has no extension, add .txt for text or .bin for binary
+                    if isinstance(extracted_data, str):
+                        output_filename = f"{output_filename}.txt"
+                    else:
+                        output_filename = f"{output_filename}.bin"
             else:
                 # Fallback to generic filename
                 if isinstance(extracted_data, str):
@@ -2016,6 +2101,60 @@ def get_steganography_manager(carrier_type: str, password: str = ""):
             # Fallback for managers that don't take password in constructor
             return manager_class()
     return None
+
+# ============================================================================
+# DIRECT FILE DOWNLOAD ENDPOINT
+# ============================================================================
+
+@app.get("/api/download/{filename}")
+async def download_file_by_name(filename: str):
+    """Download a file by filename from outputs directory"""
+    
+    # Security check - prevent directory traversal
+    if '..' in filename or '/' in filename or '\\' in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    # Check outputs directory first
+    output_file = OUTPUT_DIR / filename
+    if not output_file.exists():
+        # Fallback to uploads directory (for testing)
+        output_file = UPLOAD_DIR / filename
+        if not output_file.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+    
+    # Determine media type based on file extension
+    file_ext = Path(filename).suffix.lower()
+    media_type_map = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg', 
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.bmp': 'image/bmp',
+        '.mp4': 'video/mp4',
+        '.avi': 'video/x-msvideo',
+        '.mov': 'video/quicktime',
+        '.mkv': 'video/x-matroska',
+        '.webm': 'video/webm',
+        '.wav': 'audio/wav',
+        '.mp3': 'audio/mpeg',
+        '.flac': 'audio/flac',
+        '.ogg': 'audio/ogg',
+        '.aac': 'audio/aac',
+        '.m4a': 'audio/mp4',
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.txt': 'text/plain',
+        '.rtf': 'application/rtf',
+        '.doc': 'application/msword'
+    }
+    
+    media_type = media_type_map.get(file_ext, 'application/octet-stream')
+    
+    return FileResponse(
+        path=str(output_file),
+        filename=filename,
+        media_type=media_type
+    )
 
 # ============================================================================
 # HEALTH AND STATUS ENDPOINTS

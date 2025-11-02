@@ -723,8 +723,17 @@ export default function General() {
       // Try to use the modern File System Access API
       if ('showSaveFilePicker' in window) {
         try {
-          // Get the file extension from the default filename
-          const extension = defaultFilename.split('.').pop() || '';
+          // Get the file extension from the default filename - handle edge cases
+          const lastDotIndex = defaultFilename.lastIndexOf('.');
+          const extension = (lastDotIndex > 0 && lastDotIndex < defaultFilename.length - 1) 
+            ? defaultFilename.substring(lastDotIndex + 1).toLowerCase()
+            : '';
+          
+          // Handle problematic temporary filenames
+          const cleanFilename = defaultFilename.includes('extracted_tmp') 
+            ? `extracted_file_${Date.now()}.txt`
+            : defaultFilename;
+          
           const fileTypeMap: { [key: string]: any } = {
             'mp4': { description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } },
             'avi': { description: 'AVI Video', accept: { 'video/avi': ['.avi'] } },
@@ -740,14 +749,28 @@ export default function General() {
             'zip': { description: 'ZIP Archive', accept: { 'application/zip': ['.zip'] } }
           };
 
-          const fileType = fileTypeMap[extension.toLowerCase()] || {
-            description: 'All Files',
-            accept: { '*/*': ['.*'] }
-          };
+          // Get file type or create a proper fallback
+          let fileType = fileTypeMap[extension.toLowerCase()];
+          
+          if (!fileType) {
+            // For unknown extensions, create a proper type with the actual extension
+            if (extension && extension.length > 0) {
+              fileType = {
+                description: `${extension.toUpperCase()} File`,
+                accept: { [`application/${extension}`]: [`.${extension}`] }
+              };
+            } else {
+              // If no extension, allow all files but don't specify invalid patterns
+              fileType = {
+                description: 'All Files',
+                accept: { '*/*': [] }
+              };
+            }
+          }
 
           // Show the save dialog
           const fileHandle = await (window as any).showSaveFilePicker({
-            suggestedName: defaultFilename,
+            suggestedName: cleanFilename,
             types: [fileType]
           });
 
