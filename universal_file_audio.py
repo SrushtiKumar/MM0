@@ -494,7 +494,17 @@ class UniversalFileAudio:
             # Check capacity
             max_bytes, _, _, _ = self._get_audio_capacity(carrier_file_path)
             
-            # Create simple header: magic(6) + data_length(4) + encrypted_data
+            # Create metadata with original filename
+            metadata = {
+                'filename': original_filename or 'hidden_data.txt',
+                'data_size': len(raw_data),
+                'encrypted': bool(self.password)
+            }
+            
+            import json
+            metadata_json = json.dumps(metadata).encode('utf-8')
+            
+            # Create header: magic(6) + metadata_length(4) + metadata + data_length(4) + encrypted_data
             magic = b'SAUDIO'
             
             # Encrypt if password provided
@@ -506,9 +516,10 @@ class UniversalFileAudio:
                 final_data = raw_data
                 print(f"[SIMPLE AUDIO] Unencrypted data: {len(final_data)} bytes")
             
-            # Create minimal payload: magic + length + data
+            # Create payload: magic + metadata_length + metadata + data_length + data
+            metadata_length = struct.pack('<I', len(metadata_json))
             data_length = struct.pack('<I', len(final_data))
-            payload = magic + data_length + final_data
+            payload = magic + metadata_length + metadata_json + data_length + final_data
             
             print(f"[SIMPLE AUDIO] Total payload: {len(payload)} bytes")
             print(f"[SIMPLE AUDIO] Available capacity: {max_bytes} bytes")
@@ -701,16 +712,61 @@ class UniversalFileAudio:
                 print(f"[SIMPLE AUDIO] Invalid magic header: {magic}")
                 return None
             
-            # Get data length
-            data_length = struct.unpack('<I', bytes(extracted_bytes[6:10]))[0]
-            print(f"[SIMPLE AUDIO] Data length: {data_length} bytes")
-            
-            if len(extracted_bytes) < 10 + data_length:
-                print(f"[SIMPLE AUDIO] Not enough data: need {10 + data_length}, have {len(extracted_bytes)}")
-                return None
-            
-            # Extract the actual data
-            data_bytes = bytes(extracted_bytes[10:10+data_length])
+            # Try new format with metadata first, fall back to old format
+            try:
+                # New format: magic + metadata_length + metadata + data_length + data
+                metadata_length = struct.unpack('<I', bytes(extracted_bytes[6:10]))[0]
+                
+                # Validate metadata length is reasonable
+                if metadata_length > 1000 or metadata_length < 10:
+                    raise ValueError("Invalid metadata length, trying old format")
+                    
+                print(f"[SIMPLE AUDIO] Metadata length: {metadata_length} bytes")
+                
+                # Extract metadata
+                metadata_start = 10
+                metadata_end = metadata_start + metadata_length
+                
+                if len(extracted_bytes) < metadata_end + 4:
+                    raise ValueError("Not enough data for new format")
+                    
+                metadata_bytes = bytes(extracted_bytes[metadata_start:metadata_end])
+                
+                import json
+                metadata = json.loads(metadata_bytes.decode('utf-8'))
+                original_filename = metadata.get('filename', 'extracted_data.bin')
+                print(f"[SIMPLE AUDIO] Original filename: {original_filename}")
+                
+                # Get data length
+                data_length = struct.unpack('<I', bytes(extracted_bytes[metadata_end:metadata_end+4]))[0]
+                print(f"[SIMPLE AUDIO] Data length: {data_length} bytes")
+                
+                data_start = metadata_end + 4
+                if len(extracted_bytes) < data_start + data_length:
+                    raise ValueError(f"Not enough data: need {data_start + data_length}, have {len(extracted_bytes)}")
+                
+                # Extract the actual data
+                data_bytes = bytes(extracted_bytes[data_start:data_start+data_length])
+                
+            except (ValueError, json.JSONDecodeError, struct.error) as e:
+                # Fall back to old format: magic + data_length + data
+                print(f"[SIMPLE AUDIO] New format failed ({e}), trying old format")
+                
+                if len(extracted_bytes) < 10:
+                    print(f"[SIMPLE AUDIO] Not enough data for old format")
+                    return None
+                    
+                # Get data length (old format)
+                data_length = struct.unpack('<I', bytes(extracted_bytes[6:10]))[0]
+                print(f"[SIMPLE AUDIO] Data length (old format): {data_length} bytes")
+                
+                if len(extracted_bytes) < 10 + data_length:
+                    print(f"[SIMPLE AUDIO] Not enough data: need {10 + data_length}, have {len(extracted_bytes)}")
+                    return None
+                
+                # Extract the actual data
+                data_bytes = bytes(extracted_bytes[10:10+data_length])
+                original_filename = None  # Will use format detection for old format
             
             # Decrypt if password was used
             if self.password:
@@ -723,13 +779,14 @@ class UniversalFileAudio:
             else:
                 final_data = data_bytes
             
-            # CRITICAL FIX: Enhanced file format detection to preserve original extensions
-            # Detect file format from binary content to return proper filename
-            
-            detected_filename = self._detect_file_format(final_data)
-            
-            # Always return binary content to preserve exact original format
-            return (final_data, detected_filename)
+            # Use original filename if available, otherwise detect format
+            if original_filename:
+                filename = original_filename
+            else:
+                # Old format - detect from content
+                filename = self._detect_file_format(final_data)
+                
+            return (final_data, filename)
                 
         except Exception as e:
             print(f"[SIMPLE AUDIO] Extraction error: {e}")

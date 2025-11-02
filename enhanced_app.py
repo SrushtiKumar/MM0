@@ -218,6 +218,24 @@ def update_job_status(job_id: str, status: str, progress: int = None,
             "updated_at": datetime.now().isoformat()
         })
 
+def _is_likely_text_content(data):
+    """Check if bytes data is likely UTF-8 text content"""
+    if not isinstance(data, bytes) or len(data) == 0:
+        return False
+    
+    try:
+        # Try to decode as UTF-8
+        decoded = data.decode('utf-8')
+        
+        # Check if it contains mostly printable characters
+        printable_ratio = sum(1 for c in decoded if c.isprintable() or c.isspace()) / len(decoded)
+        
+        # If >80% printable characters and no null bytes, likely text
+        return printable_ratio > 0.8 and b'\x00' not in data[:min(100, len(data))]
+        
+    except UnicodeDecodeError:
+        return False
+
 def detect_file_format_from_binary(binary_content):
     """Detect file format from binary content and return appropriate extension"""
     if not binary_content or not isinstance(binary_content, bytes):
@@ -453,6 +471,45 @@ def is_layered_container(data):
         return parsed.get("type") == "layered_container"
     except:
         return False
+
+def translate_error_message(error_msg: str, carrier_type: str) -> str:
+    """Translate technical error messages to user-friendly ones"""
+    
+    error_lower = error_msg.lower()
+    
+    # Capacity issues
+    if "data too large" in error_lower or "need" in error_lower and "bytes" in error_lower:
+        if carrier_type == "audio":
+            return "The audio file is too small to hide this much data. Please use a larger audio file or reduce the file size you're trying to hide."
+        elif carrier_type == "video":
+            return "The video file is too small to hide this much data. Please use a longer video file or reduce the file size you're trying to hide."
+        elif carrier_type == "image":
+            return "The image file is too small to hide this much data. Please use a larger image or reduce the file size you're trying to hide."
+        else:
+            return "The carrier file is too small to hide this much data. Please use a larger file or reduce the content size."
+    
+    # File type issues
+    if "not supported" in error_lower or "unsupported" in error_lower:
+        return f"File type not supported for {carrier_type} steganography. Please try with a different file format."
+    
+    # Decryption issues
+    if "decryption" in error_lower or "wrong password" in error_lower:
+        return "Failed to extract data. Please check your password or ensure the file contains hidden data."
+    
+    # Bool encoding (shouldn't happen now but just in case)
+    if "bool" in error_lower and "encode" in error_lower:
+        return f"File type not supported for {carrier_type} steganography. Please try with a different file format."
+        
+    # File format issues
+    if "format" in error_lower and ("corrupt" in error_lower or "invalid" in error_lower):
+        return f"The {carrier_type} file appears to be corrupted or in an unsupported format. Please try with a different file."
+    
+    # Generic fallback for other technical errors
+    if len(error_msg) > 100 or any(word in error_lower for word in ['exception', 'traceback', 'error:', 'failed:']):
+        return f"Unable to process the {carrier_type} file. Please ensure the file is valid and try again."
+    
+    # If it's already user-friendly, return as-is
+    return error_msg
 
 def get_steganography_manager(carrier_type: str, password: str = ""):
     """Get the appropriate steganography manager for the carrier type"""
@@ -1547,7 +1604,7 @@ async def process_embed_operation(
                 raise
         else:
             # Other managers (image, audio, document) return dict results too
-            # Check if manager supports original_filename parameter
+            # Check if manager supports original_filename parameter and call with correct parameters
             import inspect
             sig = inspect.signature(manager.hide_data)
             if 'original_filename' in sig.parameters:
@@ -1555,15 +1612,17 @@ async def process_embed_operation(
                     carrier_file_path,
                     content_to_hide,
                     str(output_path),
-                    is_file,
-                    original_filename
+                    password=password,  # Fix: pass password correctly
+                    is_file=is_file,
+                    original_filename=original_filename
                 )
             else:
                 manager_result = manager.hide_data(
                     carrier_file_path,
                     content_to_hide,
                     str(output_path),
-                    is_file
+                    password=password,  # Fix: pass password correctly  
+                    is_file=is_file
                 )
             success = manager_result.get("success", False)
             # Get actual output path from result if available
@@ -1620,7 +1679,7 @@ async def process_embed_operation(
             os.remove(content_file_path)
             
     except Exception as e:
-        error_msg = str(e)
+        error_msg = translate_error_message(str(e))
         update_job_status(operation_id, "failed", error=error_msg)
         
         # Log failure in database
@@ -1881,7 +1940,13 @@ async def process_extract_operation(
         print(f"[DEBUG EXTRACT] Password received: {repr(password)}")
         if hasattr(manager, 'safe_stego') and hasattr(manager.safe_stego, 'password'):
             print(f"[DEBUG EXTRACT] Manager password set to: {repr(manager.safe_stego.password)}")
-        extraction_result = manager.extract_data(stego_file_path)
+        
+        # Call extract_data with password parameter
+        try:
+            extraction_result = manager.extract_data(stego_file_path, password=password)
+        except TypeError:
+            # Fallback for managers that don't accept password parameter in extract_data
+            extraction_result = manager.extract_data(stego_file_path)
         
         # DEBUG: Log extraction result details
         print(f"[DEBUG EXTRACT] extraction_result type: {type(extraction_result)}")
@@ -1978,11 +2043,16 @@ async def process_extract_operation(
             # Single layer extraction - proceed with normal logic
             update_job_status(operation_id, "processing", 80, "Saving extracted data")
             
-            # Determine if this is a text message vs a file based on filename
-            # Only treat as text message if explicitly returned as a text extraction
+            # Determine if this is a text message vs a file based on multiple criteria
+            # Check both filename patterns and content characteristics
             is_text_message = (
-                original_filename == "extracted_message.txt" or
-                original_filename == "embedded_text.txt"
+                # Known text message filenames
+                original_filename in ["extracted_message.txt", "embedded_text.txt", "hidden_data.txt"] or
+                # Generic text filenames that should be treated as text
+                (original_filename and original_filename.endswith('.txt') and 
+                 not original_filename.startswith('content_')) or
+                # Check if bytes content is actually decodable UTF-8 text
+                (isinstance(extracted_data, bytes) and _is_likely_text_content(extracted_data))
             )
             
             # Save extracted data
@@ -2044,7 +2114,15 @@ async def process_extract_operation(
             if isinstance(extracted_data, str):
                 preview = extracted_data[:100]
             elif isinstance(extracted_data, bytes):
-                preview = f"Binary file ({len(extracted_data)} bytes)"
+                # Try to decode bytes for preview if it's text content
+                if _is_likely_text_content(extracted_data):
+                    try:
+                        decoded_preview = extracted_data.decode('utf-8')[:100]
+                        preview = decoded_preview
+                    except UnicodeDecodeError:
+                        preview = f"Binary file ({len(extracted_data)} bytes)"
+                else:
+                    preview = f"Binary file ({len(extracted_data)} bytes)"
             else:
                 preview = f"Unknown data type: {type(extracted_data)}"
             
@@ -2058,17 +2136,32 @@ async def process_extract_operation(
             )
         
         # Update job status with result
+        # Generate proper preview based on content type
+        preview = None
+        data_type = "binary"
+        
+        if isinstance(extracted_data, str):
+            preview = extracted_data[:200]
+            data_type = "text"
+        elif isinstance(extracted_data, bytes):
+            if _is_likely_text_content(extracted_data):
+                try:
+                    preview = extracted_data.decode('utf-8')[:200]
+                    data_type = "text"
+                except UnicodeDecodeError:
+                    preview = f"Binary file ({len(extracted_data)} bytes)"
+                    data_type = "binary"
+            else:
+                preview = f"Binary file ({len(extracted_data)} bytes)"
+                data_type = "binary"
+        
         result = {
             "output_file": str(output_path),
             "filename": output_filename,
             "file_size": os.path.getsize(output_path),
             "processing_time": processing_time,
-            "data_type": "text" if isinstance(extracted_data, str) else "binary",
-            "preview": extracted_data[:200] if isinstance(extracted_data, str) else (
-                extracted_data.decode('utf-8', errors='ignore')[:200] 
-                if isinstance(extracted_data, bytes) and len(extracted_data) < 1000 
-                else None
-            ),
+            "data_type": data_type,
+            "preview": preview,
             "original_filename": original_filename
         }
         
@@ -2078,7 +2171,7 @@ async def process_extract_operation(
         os.remove(stego_file_path)
         
     except Exception as e:
-        error_msg = str(e)
+        error_msg = translate_error_message(str(e))
         update_job_status(operation_id, "failed", error=error_msg)
         
         # Log failure in database
