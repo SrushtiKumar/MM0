@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forensic API Test</title>
+</head>
+<body>
+    <h2>Direct API Test</h2>
+    <div id="results"></div>
+    
+    <script>
+        async function testForensicAPI() {
+            const results = document.getElementById('results');
+            
+            try {
+                // Test health endpoint
+                console.log('Testing health endpoint...');
+                const healthResponse = await fetch('http://localhost:8000/api/health');
+                const healthData = await healthResponse.json();
+                results.innerHTML += '<p>✅ Health: ' + JSON.stringify(healthData) + '</p>';
+                
+                // Test password generation
+                console.log('Testing password generation...');
+                const passwordResponse = await fetch('http://localhost:8000/api/generate-password?length=16&include_symbols=true');
+                const passwordData = await passwordResponse.json();
+                results.innerHTML += '<p>✅ Password: ' + passwordData.password + '</p>';
+                
+            } catch (error) {
+                results.innerHTML += '<p>❌ Error: ' + error.message + '</p>';
+                console.error('Test error:', error);
+            }
+        }
+        
+        // Run test on page load
+        testForensicAPI();
+    </script>
+</body>
+</html>

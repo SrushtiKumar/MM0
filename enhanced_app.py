@@ -790,6 +790,129 @@ async def embed_data(
             update_job_status(operation_id, "failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/forensic-embed", response_model=OperationResponse)
+async def forensic_embed_data(
+    carrier_file: UploadFile = File(...),
+    content_file: UploadFile = File(...),
+    password: str = Form(...),
+    forensic_metadata: str = Form(...),
+    content_type: str = Form("forensic"),
+    encryption_type: str = Form("aes-256-gcm"),
+    user_id: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Optional[SteganographyDatabase] = Depends(get_db)
+):
+    """Embed forensic evidence with metadata into carrier file"""
+    
+    # Generate operation ID
+    operation_id = str(uuid.uuid4())
+    
+    try:
+        # Parse forensic metadata
+        try:
+            metadata = json.loads(forensic_metadata)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid forensic metadata JSON")
+        
+        # Auto-detect carrier type
+        file_extension = Path(carrier_file.filename).suffix.lower()
+        if file_extension in ['.png', '.jpg', '.jpeg', '.bmp', '.gif']:
+            carrier_type = "image"
+        elif file_extension in ['.mp4', '.avi', '.mov', '.mkv', '.webm']:
+            carrier_type = "video"
+        elif file_extension in ['.wav', '.mp3', '.flac', '.ogg', '.aac', '.m4a']:
+            carrier_type = "audio"
+        elif file_extension in ['.pdf', '.docx', '.txt', '.doc']:
+            carrier_type = "document"
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported file format: {file_extension}")
+        
+        print(f"[FORENSIC API] Detected carrier type: {carrier_type} for file: {carrier_file.filename}")
+        print(f"[FORENSIC API] Forensic metadata: {metadata}")
+        
+        # Initialize job tracking
+        active_jobs[operation_id] = {
+            "status": "processing",
+            "progress": 0,
+            "message": "Starting forensic embedding process",
+            "created_at": datetime.now().isoformat(),
+            "carrier_type": carrier_type,
+            "content_type": "forensic",
+            "forensic_metadata": metadata
+        }
+        
+        # Save carrier file synchronously
+        carrier_filename = f"{operation_id}_{carrier_file.filename}"
+        carrier_path = UPLOAD_DIR / carrier_filename
+        
+        with open(carrier_path, "wb") as buffer:
+            shutil.copyfileobj(carrier_file.file, buffer)
+        
+        # Save content file
+        content_filename = f"{operation_id}_content_{content_file.filename}"
+        content_file_path = UPLOAD_DIR / content_filename
+        
+        with open(content_file_path, "wb") as buffer:
+            shutil.copyfileobj(content_file.file, buffer)
+        
+        # Create combined forensic content that includes both file and metadata
+        forensic_content = {
+            "forensic_metadata": metadata,
+            "original_filename": content_file.filename,
+            "content_type": "file_with_metadata"
+        }
+        
+        # Save forensic metadata as text content alongside the file
+        forensic_text = json.dumps(forensic_content, indent=2)
+        
+        # Database logging
+        db_operation_id = None
+        if db:
+            try:
+                db_operation_id = db.log_operation(
+                    operation_id=operation_id,
+                    operation_type="forensic_embed",
+                    carrier_filename=carrier_file.filename,
+                    content_filename=content_file.filename,
+                    user_id=user_id,
+                    project_name=metadata.get('case_id', 'Forensic Evidence'),
+                    status="processing",
+                    progress=0
+                )
+            except Exception as db_error:
+                print(f"[WARNING] Database logging failed: {db_error}")
+        
+        # Start background processing
+        expected_output_filename = generate_unique_filename(carrier_filename, "forensic_")
+        
+        background_tasks.add_task(
+            process_forensic_embed_operation,
+            operation_id,
+            str(carrier_path),
+            str(content_file_path),
+            carrier_type,
+            forensic_text,
+            password,
+            encryption_type,
+            metadata,
+            user_id,
+            db,
+            expected_output_filename,
+            db_operation_id
+        )
+        
+        return OperationResponse(
+            success=True,
+            operation_id=operation_id,
+            message="Forensic embedding operation started",
+            output_filename=expected_output_filename
+        )
+        
+    except Exception as e:
+        if operation_id in active_jobs:
+            update_job_status(operation_id, "failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/embed-batch", response_model=OperationResponse)
 async def embed_data_batch(
     carrier_files: List[UploadFile] = File(...),
@@ -1040,6 +1163,91 @@ async def extract_data(
             update_job_status(operation_id, "failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/forensic-extract", response_model=OperationResponse)
+async def forensic_extract_data(
+    stego_file: UploadFile = File(...),
+    password: str = Form(...),
+    output_format: str = Form("forensic"),
+    user_id: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Optional[SteganographyDatabase] = Depends(get_db)
+):
+    """Extract forensic evidence with metadata from steganographic file"""
+    
+    operation_id = str(uuid.uuid4())
+    
+    try:
+        # Initialize job tracking
+        active_jobs[operation_id] = {
+            "status": "processing",
+            "progress": 0,
+            "message": "Starting forensic extraction process",
+            "created_at": datetime.now().isoformat(),
+            "operation_type": "forensic_extract"
+        }
+        
+        # Determine file type
+        file_extension = Path(stego_file.filename).suffix.lower()
+        if file_extension in ['.png', '.jpg', '.jpeg', '.bmp']:
+            carrier_type = "image"
+        elif file_extension in ['.mp4', '.avi', '.mov', '.mkv']:
+            carrier_type = "video"
+        elif file_extension in ['.wav', '.mp3', '.flac']:
+            carrier_type = "audio"
+        elif file_extension in ['.pdf', '.docx', '.txt']:
+            carrier_type = "document"
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file format")
+        
+        # Save stego file synchronously
+        stego_filename = generate_unique_filename(stego_file.filename, "forensic_")
+        stego_file_path = UPLOAD_DIR / stego_filename
+        
+        with open(stego_file_path, "wb") as f:
+            content = await stego_file.read()
+            f.write(content)
+        
+        # Log operation start in database
+        db_operation_id = None
+        if db:
+            try:
+                if user_id and user_id.strip():
+                    db_operation_id = db.log_operation_start(
+                        user_id=user_id,
+                        operation_type="forensic_extract",
+                        media_type=carrier_type,
+                        file_name=stego_file.filename
+                    )
+                    print(f"[FORENSIC EXTRACT] Database operation logged: {db_operation_id}")
+                else:
+                    print(f"[FORENSIC EXTRACT] No user_id provided, skipping database logging")
+            except Exception as db_error:
+                print(f"[WARNING] Database logging failed: {db_error}")
+        
+        # Start background processing
+        background_tasks.add_task(
+            process_forensic_extract_operation,
+            operation_id,
+            str(stego_file_path),
+            carrier_type,
+            password,
+            output_format,
+            user_id,
+            db,
+            db_operation_id
+        )
+        
+        return OperationResponse(
+            success=True,
+            operation_id=operation_id,
+            message="Forensic extraction operation started"
+        )
+        
+    except Exception as e:
+        if operation_id in active_jobs:
+            update_job_status(operation_id, "failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/analyze")
 async def analyze_file(
     file: UploadFile = File(...),
@@ -1165,20 +1373,30 @@ async def get_operation_status(operation_id: str):
             "individual_operations": job.get("individual_operations", [])
         }
         
+        # Convert error to string if it's a dict
+        error = job.get("error")
+        if isinstance(error, dict):
+            error = str(error)
+        
         return StatusResponse(
             status=job["status"],
             progress=progress,
             message=f"Processed {completed_files + failed_files}/{total_files} files",
-            error=job.get("error"),
+            error=error,
             result=batch_result
         )
     else:
         # Handle regular operations
+        # Convert error to string if it's a dict
+        error = job.get("error")
+        if isinstance(error, dict):
+            error = str(error)
+        
         return StatusResponse(
             status=job["status"],
             progress=job.get("progress"),
             message=job.get("message"),
-            error=job.get("error"),
+            error=error,
             result=job.get("result")
         )
 
@@ -1281,6 +1499,47 @@ async def download_batch_result(operation_id: str):
         if os.path.exists(zip_path):
             os.remove(zip_path)
         raise HTTPException(status_code=500, detail=f"Failed to create ZIP archive: {str(e)}")
+
+@app.get("/api/operations/{operation_id}/download-forensic")
+async def download_forensic_result(operation_id: str):
+    """Download forensic evidence as a ZIP containing the extracted file and metadata.txt"""
+    if operation_id not in active_jobs:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    
+    job = active_jobs[operation_id]
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Operation not completed")
+    
+    result = job.get("result")
+    if not result:
+        raise HTTPException(status_code=404, detail="Result not found")
+    
+    # Check if this is a forensic extraction with metadata
+    forensic_metadata = result.get("forensic_metadata")
+    if not forensic_metadata:
+        # Fallback to regular download for non-forensic files
+        return await download_result(operation_id)
+    
+    # The output_path already points to the correctly created forensic ZIP file
+    output_file = result.get("output_path")
+    if not output_file or not os.path.exists(output_file):
+        raise HTTPException(status_code=404, detail="Output file not found")
+    
+    # Get the filename from result or generate based on case info
+    zip_filename = result.get("filename")
+    if not zip_filename:
+        case_id = forensic_metadata.get('case_id', 'evidence')
+        zip_filename = f"forensic_evidence_{case_id}_{operation_id[:8]}.zip"
+    
+    print(f"[FORENSIC DOWNLOAD] Serving forensic ZIP: {zip_filename}")
+    
+    # Return the already correctly created ZIP file
+    return FileResponse(
+        output_file,
+        filename=zip_filename,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=\"{zip_filename}\""}
+    )
 
 @app.delete("/api/operations/{operation_id}")
 async def delete_operation(operation_id: str):
@@ -1913,6 +2172,495 @@ async def process_batch_embed_operation(
                 else:
                     active_jobs[batch_operation_id]["status"] = "completed_with_errors"
 
+async def process_forensic_embed_operation(
+    operation_id: str,
+    carrier_file_path: str,
+    content_file_path: str,
+    carrier_type: str,
+    forensic_text: str,
+    password: str,
+    encryption_type: str,
+    metadata: dict,
+    user_id: Optional[str],
+    db: Optional[SteganographyDatabase],
+    expected_output_filename: str,
+    db_operation_id: Optional[str] = None
+):
+    """Background task to process forensic embedding operation"""
+    
+    import json
+    start_time = time.time()
+    
+    try:
+        update_job_status(operation_id, "processing", 30, "Preparing forensic content")
+        
+        # Read the file to hide
+        with open(content_file_path, "rb") as f:
+            file_content = f.read()
+        
+        print(f"[FORENSIC EMBED DEBUG] Original file size: {len(file_content)} bytes")
+        print(f"[FORENSIC EMBED DEBUG] Original file first 20 bytes: {file_content[:20]}")
+        
+        # Create forensic container with both file and metadata
+        file_data_b64 = base64.b64encode(file_content).decode('utf-8')
+        print(f"[FORENSIC EMBED DEBUG] Base64 encoded length: {len(file_data_b64)}")
+        print(f"[FORENSIC EMBED DEBUG] Base64 first 100 chars: {file_data_b64[:100]}")
+        
+        forensic_container = {
+            "type": "forensic_evidence",
+            "metadata": metadata,
+            "file_data": file_data_b64,
+            "original_filename": metadata.get('name', os.path.basename(content_file_path)),
+            "timestamp": datetime.now().isoformat(),
+            "embedded_by": user_id or "unknown"
+        }
+        
+        # Verify base64 round-trip integrity
+        try:
+            verification_decode = base64.b64decode(file_data_b64)
+            if verification_decode == file_content:
+                print(f"[FORENSIC EMBED DEBUG] ✅ Base64 round-trip verification successful")
+            else:
+                print(f"[FORENSIC EMBED ERROR] ❌ Base64 round-trip verification failed!")
+                print(f"  Original size: {len(file_content)}, Decoded size: {len(verification_decode)}")
+        except Exception as verify_error:
+            print(f"[FORENSIC EMBED ERROR] Base64 verification error: {verify_error}")
+        
+        # Convert to JSON string to embed as text
+        forensic_content = json.dumps(forensic_container, indent=2)
+        
+        update_job_status(operation_id, "processing", 50, "Performing forensic steganography")
+        
+        # Get appropriate steganography manager
+        manager = get_steganography_manager(carrier_type, password)
+        if not manager:
+            raise Exception(f"No manager available for {carrier_type}")
+        
+        # Generate output path
+        output_path = OUTPUT_DIR / expected_output_filename
+        
+        update_job_status(operation_id, "processing", 70, "Embedding forensic evidence")
+        
+        # Perform the embedding using text mode since we're embedding JSON
+        if carrier_type == "video":
+            manager_result = manager.hide_data(
+                carrier_file_path,
+                forensic_content,
+                str(output_path),
+                password,
+                is_file=False,  # Embedding as text
+                original_filename=f"forensic_case_{metadata.get('case_id', 'unknown')}.json"
+            )
+        else:
+            # Check if manager supports original_filename parameter
+            import inspect
+            sig = inspect.signature(manager.hide_data)
+            if 'original_filename' in sig.parameters:
+                manager_result = manager.hide_data(
+                    carrier_file_path,
+                    forensic_content,
+                    str(output_path),
+                    password=password,
+                    is_file=False,  # Embedding as text
+                    original_filename=f"forensic_case_{metadata.get('case_id', 'unknown')}.json"
+                )
+            else:
+                manager_result = manager.hide_data(
+                    carrier_file_path,
+                    forensic_content,
+                    str(output_path),
+                    password=password,
+                    is_file=False  # Embedding as text
+                )
+        
+        success = manager_result.get("success", False)
+        
+        if not success:
+            error_msg = manager_result.get("error", "Forensic embedding failed")
+            raise Exception(f"Forensic embedding failed: {error_msg}")
+        
+        # Check if output file exists
+        if not output_path.exists():
+            # Check for alternative output path from manager result
+            actual_output_path = manager_result.get("output_path")
+            if actual_output_path and os.path.exists(actual_output_path):
+                output_path = Path(actual_output_path)
+            else:
+                raise Exception("Output file was not created")
+        
+        update_job_status(operation_id, "processing", 90, "Finalizing forensic evidence")
+        
+        # Update job with results including forensic metadata
+        result_data = {
+            "success": True,
+            "output_path": str(output_path),
+            "output_file": str(output_path),  # Add this field for download endpoint compatibility
+            "filename": output_path.name,
+            "file_size": output_path.stat().st_size,
+            "forensic_metadata": metadata,
+            "case_id": metadata.get('case_id'),
+            "embedded_owner": metadata.get('embedded_owner'),
+            "processing_time": time.time() - start_time
+        }
+        
+        update_job_status(operation_id, "completed", 100, "Forensic evidence embedded successfully", result=result_data)
+        
+        # Update database
+        if db and db_operation_id:
+            try:
+                db.update_operation_status(
+                    db_operation_id,
+                    "completed",
+                    100,
+                    output_filename=output_path.name,
+                    file_size=output_path.stat().st_size
+                )
+                print(f"[FORENSIC] Database updated for operation {db_operation_id}")
+            except Exception as db_error:
+                print(f"[WARNING] Database update failed: {db_error}")
+        
+        print(f"[FORENSIC] Operation {operation_id} completed successfully")
+        
+    except Exception as e:
+        print(f"[FORENSIC ERROR] Operation {operation_id} failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        error_message = translate_error_message(str(e), carrier_type)
+        update_job_status(operation_id, "failed", error=error_message)
+        
+        # Update database
+        if db and db_operation_id:
+            try:
+                db.update_operation_status(db_operation_id, "failed", error=error_message)
+            except Exception as db_error:
+                print(f"[WARNING] Database update failed: {db_error}")
+
+def detect_filename_from_content(data):
+    """Detect appropriate filename and extension based on file content"""
+    if not data:
+        return "extracted_file.bin"
+    
+    # Convert to bytes if it's a string
+    if isinstance(data, str):
+        try:
+            data_bytes = data.encode('utf-8')
+        except:
+            return "extracted_file.txt"
+    else:
+        data_bytes = data
+    
+    # Check for common file signatures
+    if data_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+        return "extracted_image.png"
+    elif data_bytes.startswith(b'\xFF\xD8\xFF'):
+        return "extracted_image.jpg"
+    elif data_bytes.startswith(b'GIF8'):
+        return "extracted_image.gif"
+    elif data_bytes.startswith(b'%PDF'):
+        return "extracted_document.pdf"
+    elif data_bytes.startswith(b'PK\x03\x04'):
+        # Could be ZIP, DOCX, XLSX, etc.
+        if b'word/' in data_bytes[:1024]:
+            return "extracted_document.docx"
+        elif b'xl/' in data_bytes[:1024]:
+            return "extracted_document.xlsx"
+        else:
+            return "extracted_archive.zip"
+    elif data_bytes.startswith(b'RIFF') and b'WAVE' in data_bytes[:20]:
+        return "extracted_audio.wav"
+    elif data_bytes.startswith(b'ID3') or data_bytes.startswith(b'\xFF\xFB'):
+        return "extracted_audio.mp3"
+    elif data_bytes.startswith(b'fLaC'):
+        return "extracted_audio.flac"
+    elif data_bytes.startswith(b'\x00\x00\x00\x18ftypmp4') or data_bytes.startswith(b'\x00\x00\x00\x20ftypmp4'):
+        return "extracted_video.mp4"
+    else:
+        # Check if it looks like text content
+        try:
+            if isinstance(data, str):
+                return "extracted_text.txt"
+            else:
+                decoded = data_bytes.decode('utf-8', errors='ignore')
+                if all(ord(c) < 128 or c.isspace() for c in decoded[:100]):  # ASCII-like content
+                    return "extracted_text.txt"
+        except:
+            pass
+    
+    return "extracted_file.bin"
+
+async def process_forensic_extract_operation(
+    operation_id: str,
+    stego_file_path: str,
+    carrier_type: str,
+    password: str,
+    output_format: str,
+    user_id: Optional[str],
+    db: Optional[SteganographyDatabase],
+    db_operation_id: Optional[str] = None
+):
+    """Background task to process forensic extraction operation"""
+    
+    import json
+    start_time = time.time()
+    
+    try:
+        update_job_status(operation_id, "processing", 30, "Starting forensic extraction")
+        
+        # Get appropriate steganography manager
+        manager = get_steganography_manager(carrier_type, password)
+        if not manager:
+            raise Exception(f"No manager available for {carrier_type}")
+        
+        update_job_status(operation_id, "processing", 50, "Extracting forensic evidence")
+        
+        # Extract data
+        print(f"[FORENSIC EXTRACT DEBUG] About to call manager.extract_data() with password")
+        extraction_result = manager.extract_data(stego_file_path, password=password)
+        print(f"[FORENSIC EXTRACT DEBUG] Manager returned: {type(extraction_result)}")
+        
+        # Handle tuple return (data, filename) from some managers
+        if isinstance(extraction_result, tuple):
+            extracted_data, original_filename = extraction_result
+            print(f"[FORENSIC EXTRACT DEBUG] Tuple result - data: {type(extracted_data)}, filename: {original_filename}")
+        else:
+            extracted_data = extraction_result
+            original_filename = None
+            print(f"[FORENSIC EXTRACT DEBUG] Single result - data: {type(extracted_data)}")
+        
+        if not extracted_data:
+            raise Exception("No hidden data found in the file")
+        
+        update_job_status(operation_id, "processing", 70, "Parsing forensic metadata")
+        
+        # Debug: Check what we extracted
+        print(f"[FORENSIC EXTRACT DEBUG] Extracted data type: {type(extracted_data)}")
+        print(f"[FORENSIC EXTRACT DEBUG] Extracted data length: {len(extracted_data) if extracted_data else 0}")
+        if isinstance(extracted_data, str):
+            print(f"[FORENSIC EXTRACT DEBUG] First 500 chars: {repr(extracted_data[:500])}")
+            # Check if it looks like JSON
+            if extracted_data.strip().startswith('{'):
+                print("[FORENSIC EXTRACT DEBUG] ✅ Looks like JSON - starts with {")
+            else:
+                print("[FORENSIC EXTRACT DEBUG] ❌ Does not look like JSON")
+        elif isinstance(extracted_data, bytes):
+            try:
+                decoded_preview = extracted_data.decode('utf-8', errors='replace')[:500] 
+                print(f"[FORENSIC EXTRACT DEBUG] First 500 chars (decoded): {repr(decoded_preview)}")
+                # Check if decoded looks like JSON
+                if decoded_preview.strip().startswith('{'):
+                    print("[FORENSIC EXTRACT DEBUG] ✅ Decoded looks like JSON - starts with {")
+                else:
+                    print("[FORENSIC EXTRACT DEBUG] ❌ Decoded does not look like JSON")
+            except:
+                print(f"[FORENSIC EXTRACT DEBUG] Binary data, first 100 bytes: {extracted_data[:100]}")
+        
+        # Try to parse as forensic evidence
+        forensic_metadata = None
+        extracted_file_data = None
+        extracted_filename = original_filename if original_filename else "extracted_evidence"
+        forensic_parsing_success = False
+        
+        try:
+            forensic_container = None
+            
+            # If extracted data is text, try to parse as JSON
+            if isinstance(extracted_data, str):
+                print(f"[FORENSIC EXTRACT DEBUG] Trying to parse string as JSON...")
+                forensic_container = json.loads(extracted_data)
+                print(f"[FORENSIC EXTRACT DEBUG] JSON parsing successful")
+            elif isinstance(extracted_data, bytes):
+                # Try to decode as UTF-8 and parse as JSON
+                try:
+                    print(f"[FORENSIC EXTRACT DEBUG] Trying to decode bytes and parse as JSON...")
+                    decoded_str = extracted_data.decode('utf-8')
+                    forensic_container = json.loads(decoded_str)
+                    print(f"[FORENSIC EXTRACT DEBUG] Bytes decode and JSON parsing successful")
+                except UnicodeDecodeError as ue:
+                    print(f"[FORENSIC EXTRACT DEBUG] Unicode decode error: {ue}")
+                    # Not UTF-8 text, treat as binary file
+                    forensic_container = None
+            else:
+                print(f"[FORENSIC EXTRACT DEBUG] Extracted data is neither string nor bytes")
+                forensic_container = None
+            
+            print(f"[FORENSIC EXTRACT DEBUG] forensic_container type: {type(forensic_container)}")
+            if forensic_container:
+                print(f"[FORENSIC EXTRACT DEBUG] forensic_container keys: {list(forensic_container.keys()) if isinstance(forensic_container, dict) else 'not a dict'}")
+                print(f"[FORENSIC EXTRACT DEBUG] container type field: {forensic_container.get('type') if isinstance(forensic_container, dict) else 'N/A'}")
+            
+            # Check if this is a forensic evidence container
+            if forensic_container and forensic_container.get("type") == "forensic_evidence":
+                forensic_metadata = forensic_container.get("metadata", {})
+                file_data_b64 = forensic_container.get("file_data")
+                extracted_filename = forensic_container.get("original_filename", "extracted_evidence")
+                
+                if file_data_b64:
+                    print(f"[FORENSIC EXTRACT DEBUG] Base64 data length: {len(file_data_b64)}")
+                    print(f"[FORENSIC EXTRACT DEBUG] Base64 first 100 chars: {file_data_b64[:100]}")
+                    try:
+                        extracted_file_data = base64.b64decode(file_data_b64)
+                        forensic_parsing_success = True
+                        print(f"[FORENSIC EXTRACT DEBUG] ✅ Forensic base64 decode successful!")
+                        print(f"[FORENSIC EXTRACT DEBUG] Decoded binary data length: {len(extracted_file_data)}")
+                        print(f"[FORENSIC EXTRACT DEBUG] Decoded first 20 bytes: {extracted_file_data[:20]}")
+                    except Exception as decode_error:
+                        print(f"[FORENSIC EXTRACT ERROR] Base64 decode failed: {decode_error}")
+                        extracted_file_data = None
+                        forensic_parsing_success = False
+                else:
+                    print(f"[FORENSIC EXTRACT ERROR] No file_data found in forensic container")
+                    forensic_parsing_success = False
+                
+                print(f"[FORENSIC EXTRACT] Found forensic evidence: {forensic_metadata}")
+            else:
+                # Not forensic evidence, treat as regular extraction
+                print(f"[FORENSIC EXTRACT] No forensic container found, treating as regular extraction")
+                forensic_parsing_success = False
+                
+        except (json.JSONDecodeError, Exception) as parse_error:
+            # Failed to parse as forensic evidence, treat as regular file
+            print(f"[FORENSIC EXTRACT] Failed to parse as forensic evidence: {parse_error}")
+            forensic_parsing_success = False
+        
+        # Handle fallback for non-forensic or failed forensic parsing
+        if not forensic_parsing_success and extracted_file_data is None:
+            print(f"[FORENSIC EXTRACT] Using raw extracted data as fallback")
+            extracted_file_data = extracted_data
+            if original_filename:
+                extracted_filename = original_filename
+            else:
+                # Try to detect file type from content
+                extracted_filename = detect_filename_from_content(extracted_data)
+        
+        # Final validation
+        if extracted_file_data is None:
+            raise Exception("No valid file data could be extracted")
+            
+        print(f"[FORENSIC EXTRACT] Final extracted_file_data type: {type(extracted_file_data)}")
+        print(f"[FORENSIC EXTRACT] Final extracted_file_data size: {len(extracted_file_data) if extracted_file_data else 0}")
+        print(f"[FORENSIC EXTRACT] Forensic parsing successful: {forensic_parsing_success}")
+        
+        update_job_status(operation_id, "processing", 90, "Creating forensic evidence package")
+        
+        # Create ZIP file containing extracted file and forensic metadata
+        import zipfile
+        import tempfile
+        
+        zip_filename = f"{operation_id}_forensic_evidence_package.zip"
+        zip_path = OUTPUT_DIR / zip_filename
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # Add the extracted file to ZIP
+            print(f"[FORENSIC EXTRACT DEBUG] Adding file to ZIP: {extracted_filename}")
+            print(f"[FORENSIC EXTRACT DEBUG] File data type: {type(extracted_file_data)}")
+            print(f"[FORENSIC EXTRACT DEBUG] File data length: {len(extracted_file_data) if extracted_file_data else 0}")
+            
+            if isinstance(extracted_file_data, str):
+                # For text files, write as string
+                print(f"[FORENSIC EXTRACT DEBUG] Writing as text to ZIP")
+                zip_file.writestr(extracted_filename, extracted_file_data)
+            else:
+                # For binary files, write as bytes
+                print(f"[FORENSIC EXTRACT DEBUG] Writing as binary to ZIP")
+                print(f"[FORENSIC EXTRACT DEBUG] Binary first 20 bytes: {extracted_file_data[:20] if extracted_file_data else 'None'}")
+                zip_file.writestr(extracted_filename, extracted_file_data)
+            
+            # Create and add forensic metadata text file
+            if forensic_metadata:
+                metadata_content = f"""FORENSIC EVIDENCE METADATA
+================================
+
+Case ID: {forensic_metadata.get('case_id', 'N/A')}
+Embedded Owner: {forensic_metadata.get('embedded_owner', 'N/A')}
+Timestamp: {forensic_metadata.get('timestamp', 'N/A')}
+Description: {forensic_metadata.get('description', 'N/A')}
+
+File Details:
+- Original Filename: {forensic_metadata.get('name', extracted_filename)}
+- File Size: {forensic_metadata.get('file_size', 'Unknown')} bytes
+- File Type: {forensic_metadata.get('file_type', 'Unknown')}
+- Carrier File: {forensic_metadata.get('carrier_name', 'Unknown')}
+
+Processing Details:
+- Extracted At: {datetime.now().isoformat()}
+- Operation ID: {operation_id}
+- Created By: {forensic_metadata.get('created_by', 'Unknown')}
+
+================================
+This file contains forensic evidence extracted from steganographic carrier media.
+Handle according to your organization's evidence management procedures.
+"""
+                zip_file.writestr("forensic_metadata.txt", metadata_content)
+            else:
+                # Even for non-forensic extractions, add basic metadata
+                basic_metadata = f"""EXTRACTION METADATA
+===================
+
+Extracted File: {extracted_filename}
+Extraction Time: {datetime.now().isoformat()}
+Operation ID: {operation_id}
+Source: Standard steganographic extraction
+
+Note: No forensic metadata was embedded with this file.
+This appears to be a standard hidden file without forensic context.
+"""
+                zip_file.writestr("extraction_info.txt", basic_metadata)
+        
+        # Update paths to point to ZIP file
+        output_path = zip_path
+        
+        # Prepare result data
+        result_data = {
+            "success": True,
+            "output_path": str(output_path),
+            "output_file": str(output_path),  # Add output_file for download compatibility
+            "filename": output_path.name,
+            "file_size": output_path.stat().st_size,
+            "extracted_content": extracted_filename,
+            "processing_time": time.time() - start_time
+        }
+        
+        # Add forensic metadata to result if found
+        if forensic_metadata:
+            result_data["forensic_metadata"] = forensic_metadata
+            result_data["is_forensic_evidence"] = True
+        else:
+            result_data["is_forensic_evidence"] = False
+        
+        update_job_status(operation_id, "completed", 100, "Forensic extraction completed successfully", result=result_data)
+        
+        # Update database
+        if db and db_operation_id:
+            try:
+                db.update_operation_status(
+                    db_operation_id,
+                    "completed",
+                    100,
+                    output_filename=output_path.name,
+                    file_size=output_path.stat().st_size
+                )
+                print(f"[FORENSIC EXTRACT] Database updated for operation {db_operation_id}")
+            except Exception as db_error:
+                print(f"[WARNING] Database update failed: {db_error}")
+        
+        print(f"[FORENSIC EXTRACT] Operation {operation_id} completed successfully")
+        
+    except Exception as e:
+        print(f"[FORENSIC EXTRACT ERROR] Operation {operation_id} failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        error_message = translate_error_message(str(e), carrier_type)
+        update_job_status(operation_id, "failed", error=error_message)
+        
+        # Update database
+        if db and db_operation_id:
+            try:
+                db.update_operation_status(db_operation_id, "failed", error=error_message)
+            except Exception as db_error:
+                print(f"[WARNING] Database update failed: {db_error}")
+
 async def process_extract_operation(
     operation_id: str,
     stego_file_path: str,
@@ -2303,6 +3051,11 @@ async def list_operations(limit: int = 100):
         })
     
     return {"operations": operations}
+
+@app.get("/forensic-evidence")
+async def serve_forensic_evidence():
+    """Serve the forensic evidence page"""
+    return FileResponse("templates/index.html")
 
 # ============================================================================
 # CLEANUP AND MAINTENANCE
