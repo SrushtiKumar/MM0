@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Save As Functionality</title>
+</head>
+<body>
+    <h1>File System Access API Test</h1>
+    <p>This page tests the File System Access API functionality used in the Save As feature.</p>
+    
+    <button id="testSaveAs">Test Save As Dialog</button>
+    <button id="testSupport">Check API Support</button>
+    
+    <div id="result" style="margin-top: 20px; padding: 10px; border: 1px solid #ccc;"></div>
+
+    <script>
+        const resultDiv = document.getElementById('result');
+        
+        document.getElementById('testSupport').addEventListener('click', () => {
+            const isSupported = 'showSaveFilePicker' in window && window.isSecureContext;
+            resultDiv.innerHTML = `
+                <h3>API Support Status:</h3>
+                <p><strong>File System Access API:</strong> ${isSupported ? '✅ Supported' : '❌ Not Supported'}</p>
+                <p><strong>Secure Context:</strong> ${window.isSecureContext ? '✅ Yes (HTTPS/localhost)' : '❌ No (HTTP)'}</p>
+                <p><strong>showSaveFilePicker:</strong> ${'showSaveFilePicker' in window ? '✅ Available' : '❌ Not Available'}</p>
+            `;
+        });
+        
+        document.getElementById('testSaveAs').addEventListener('click', async () => {
+            if (!('showSaveFilePicker' in window)) {
+                resultDiv.innerHTML = '<p style="color: red;">❌ File System Access API not supported in this browser</p>';
+                return;
+            }
+            
+            if (!window.isSecureContext) {
+                resultDiv.innerHTML = '<p style="color: red;">❌ File System Access API requires HTTPS or localhost</p>';
+                return;
+            }
+            
+            try {
+                // Create a test file
+                const testContent = 'This is a test file created by the Save As functionality test.';
+                const blob = new Blob([testContent], { type: 'text/plain' });
+                
+                // Show save dialog
+                const fileHandle = await window.showSaveFilePicker({
+                    suggestedName: 'test-save-as.txt',
+                    types: [
+                        {
+                            description: 'Text Files',
+                            accept: { 'text/plain': ['.txt'] }
+                        },
+                        {
+                            description: 'All Files',
+                            accept: { '*/*': ['.*'] }
+                        }
+                    ]
+                });
+                
+                // Write file
+                const writable = await fileHandle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                
+                resultDiv.innerHTML = `<p style="color: green;">✅ File saved successfully as "${fileHandle.name}"!</p>`;
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    resultDiv.innerHTML = '<p style="color: orange;">⚠️ Save cancelled by user</p>';
+                } else {
+                    resultDiv.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
+                }
+            }
+        });
+        
+        // Auto-check support on load
+        document.getElementById('testSupport').click();
+    </script>
+</body>
+</html>

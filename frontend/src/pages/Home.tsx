@@ -6,6 +6,7 @@ import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { ArrowRight, Play, FileImage, Shield, Lock, Eye, Zap } from "lucide-react";
+import DemoVideo from "@/assets/DemoExp.mp4";
 
 export default function Home() {
   const navigate = useNavigate();
@@ -24,8 +25,19 @@ export default function Home() {
 
     checkAuth();
 
-    // Scroll to top when component mounts
-    window.scrollTo(0, 0);
+    // Handle navigation and scrolling
+    if (window.location.hash === '#demo') {
+      // Scroll to demo section after page loads
+      setTimeout(() => {
+        const demoElement = document.getElementById('demo');
+        if (demoElement) {
+          demoElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    } else {
+      // Scroll to top when component mounts
+      window.scrollTo(0, 0);
+    }
   }, [navigate]);
 
   if (isLoading) {
@@ -54,11 +66,21 @@ export default function Home() {
                 <Button asChild size="lg" className="btn-primary">
                   <Link to="/dashboard">Start Protecting Data</Link>
                 </Button>
-                <Button asChild size="lg" variant="outline">
-                  <Link to="#demo">
-                    <Play className="mr-2 h-4 w-4" />
-                    Watch Demo
-                  </Link>
+                <Button 
+                  size="lg" 
+                  variant="outline"
+                  onClick={() => {
+                    const demoSection = document.getElementById('demo');
+                    if (demoSection) {
+                      demoSection.scrollIntoView({ 
+                        behavior: 'smooth', 
+                        block: 'start'
+                      });
+                    }
+                  }}
+                >
+                  <Play className="mr-2 h-4 w-4" />
+                  Watch Demo
                 </Button>
               </div>
             </div>
@@ -141,44 +163,46 @@ export default function Home() {
                   Watch VeilForge Transform Your Data Security
                 </h2>
                 <p className="text-muted-foreground mb-6">
-                  See how easy it is to embed confidential documents, images, and messages into ordinary photos with military-grade security.
+                  Watch our comprehensive demo showing VeilForge's powerful steganography capabilities in action. Learn how to securely hide and protect your sensitive data.
                 </p>
                 <ul className="space-y-3 mb-8">
                   <li className="flex items-center">
                     <div className="h-5 w-5 rounded-full bg-primary/10 text-primary flex items-center justify-center mr-3">
                       <Zap className="h-3 w-3" />
                     </div>
-                    Real-time embedding process demonstration
+                    Live steganography process demonstration
                   </li>
                   <li className="flex items-center">
                     <div className="h-5 w-5 rounded-full bg-primary/10 text-primary flex items-center justify-center mr-3">
                       <Lock className="h-3 w-3" />
                     </div>
-                    Advanced encryption features walkthrough
+                    Advanced encryption and security features
                   </li>
                   <li className="flex items-center">
                     <div className="h-5 w-5 rounded-full bg-primary/10 text-primary flex items-center justify-center mr-3">
                       <Shield className="h-3 w-3" />
                     </div>
-                    Enterprise security capabilities showcase
+                    Real-world use cases and applications
                   </li>
                 </ul>
               </div>
               
               <div className="relative animate-fade-in [animation-delay:200ms]">
-                <div className="aspect-video rounded-xl overflow-hidden shadow-2xl bg-gradient-to-br from-primary/20 to-sea-light/30 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mx-auto mb-4 cursor-pointer hover:bg-white/30 transition-colors">
-                      <Play className="h-8 w-8 text-white ml-1" />
-                    </div>
-                    <p className="text-white font-medium">VeilForge Demo Video</p>
-                    <p className="text-white/80 text-sm">Click to watch (3:42)</p>
-                  </div>
+                <div className="aspect-video rounded-xl overflow-hidden shadow-2xl bg-black">
+                  <video 
+                    className="w-full h-full object-cover"
+                    controls
+                    preload="metadata"
+                    poster=""
+                  >
+                    <source src={DemoVideo} type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
                 </div>
                 
                 {/* Floating elements */}
                 <div className="absolute -top-4 -right-4 bg-primary text-white px-4 py-2 rounded-full text-sm font-medium shadow-lg">
-                  New Features!
+                  Demo Video
                 </div>
                 <div className="absolute -bottom-4 -left-4 bg-white dark:bg-card rounded-lg p-4 shadow-xl">
                   <div className="flex items-center space-x-3">

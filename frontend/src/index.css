@@ -141,4 +141,14 @@
   .dark input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     filter: invert(1);
   }
+
+  /* Progress bar shimmer animation */
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
 }

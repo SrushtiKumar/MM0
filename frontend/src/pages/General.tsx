@@ -122,7 +122,9 @@ export default function General() {
   const [password, setPassword] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [progressCompleted, setProgressCompleted] = useState(false);
   const [operationResult, setOperationResult] = useState<any>(null);
+  const [progressInterval, setProgressInterval] = useState<NodeJS.Timeout | null>(null);
   const [currentOperationId, setCurrentOperationId] = useState<string | null>(null);
   const [supportedFormats, setSupportedFormats] = useState<SupportedFormats | null>(null);
   const [carrierType, setCarrierType] = useState("image");
@@ -147,6 +149,32 @@ export default function General() {
   const [estimateType, setEstimateType] = useState<"carrier" | "content">("carrier");
   const [estimateResult, setEstimateResult] = useState<any>(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
+
+  // Safe progress setter that prevents backwards movement after completion
+  const setSafeProgress = (value: number | ((prev: number) => number)) => {
+    if (progressCompleted) return; // Don't update progress if already completed
+    
+    if (typeof value === 'function') {
+      setProgress(prev => {
+        const newValue = value(prev);
+        if (newValue >= 100) {
+          setProgressCompleted(true);
+        }
+        return Math.max(prev, newValue); // Never go backwards
+      });
+    } else {
+      if (value >= 100) {
+        setProgressCompleted(true);
+      }
+      setProgress(prev => Math.max(prev, value)); // Never go backwards
+    }
+  };
+
+  // Reset progress state for new operations
+  const resetProgress = () => {
+    setProgress(0);
+    setProgressCompleted(false);
+  };
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -349,6 +377,29 @@ export default function General() {
     }
   };
 
+  const simulateProgress = () => {
+    resetProgress();
+    let currentProgress = 0;
+    
+    const interval = setInterval(() => {
+      currentProgress += Math.random() * 15 + 5; // Progress by 5-20% each step
+      if (currentProgress >= 95) {
+        currentProgress = 95; // Cap at 95% until real completion
+        clearInterval(interval);
+      }
+      setSafeProgress(Math.min(currentProgress, 95));
+    }, 500); // Update every 500ms for smooth animation
+    
+    setProgressInterval(interval);
+  };
+
+  const stopProgressSimulation = () => {
+    if (progressInterval) {
+      clearInterval(progressInterval);
+      setProgressInterval(null);
+    }
+  };
+
   // Password Management Functions
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
@@ -476,9 +527,12 @@ export default function General() {
     }
 
     setIsProcessing(true);
-    setProgress(0);
+    resetProgress();
     setOperationResult(null);
     setCurrentOperationId(null);
+    
+    // Start progress simulation for smooth animation
+    simulateProgress();
     
     try {
       const formData = new FormData();
@@ -579,9 +633,12 @@ export default function General() {
     }
 
     setIsProcessing(true);
-    setProgress(0);
+    resetProgress();
     setOperationResult(null);
     setCurrentOperationId(null);
+    
+    // Start progress simulation for smooth animation
+    simulateProgress();
     
     try {
       // Prepare form data
@@ -653,17 +710,27 @@ export default function General() {
         const status = await response.json();
         
         if (status.progress !== undefined) {
-          setProgress(status.progress);
+          // Stop simulation and use real progress, but never go backwards
+          stopProgressSimulation();
+          setSafeProgress(status.progress);
         }
 
         if (status.status === "completed") {
-          setIsProcessing(false);
-          setOperationResult(status.result);
-          toast.success("Operation completed successfully!");
+          // Stop simulation and ensure 100% progress before completing
+          stopProgressSimulation();
+          setSafeProgress(100);
+          
+          // Wait a moment for the progress bar to reach 100%
+          setTimeout(() => {
+            setIsProcessing(false);
+            setOperationResult(status.result);
+            toast.success("Operation completed successfully!");
+          }, 500);
           return;
         }
 
         if (status.status === "failed") {
+          stopProgressSimulation();
           setIsProcessing(false);
           // Clean up backend error messages for better UX
           let errorMessage = status.error || "Operation failed";
@@ -684,12 +751,14 @@ export default function General() {
         if (attempts < maxAttempts && (status.status === "processing" || status.status === "starting")) {
           setTimeout(poll, 1000);
         } else {
+          stopProgressSimulation();
           setIsProcessing(false);
           if (attempts >= maxAttempts) {
             toast.error("Operation timed out");
           }
         }
       } catch (error) {
+        stopProgressSimulation();
         setIsProcessing(false);
         toast.error("Failed to check operation status");
         console.error("Status poll error:", error);
@@ -992,14 +1061,6 @@ export default function General() {
                 <Badge variant="secondary" className="flex items-center gap-2">
                   <Zap className="h-3 w-3" />
                   Fast Processing
-                </Badge>
-                {/* API Status Indicator */}
-                <Badge 
-                  variant={apiHealth ? "default" : "destructive"} 
-                  className="flex items-center gap-2"
-                >
-                  <div className={`h-2 w-2 rounded-full ${apiHealth ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
-                  API: {apiHealth ? 'Connected' : 'Disconnected'}
                 </Badge>
               </div>
             </div>
@@ -1363,11 +1424,14 @@ export default function General() {
                       )}
 
                       {isProcessing && (
-                        <div className="space-y-2">
-                          <Label>Processing Progress</Label>
-                          <Progress value={progress} className="w-full" />
-                          <p className="text-sm text-muted-foreground">
-                            Embedding data... {progress}%
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-sm font-medium">Processing Progress</Label>
+                            <span className="text-sm font-semibold text-primary">{Math.round(progress)}%</span>
+                          </div>
+                          <Progress value={progress} className="w-full h-3" />
+                          <p className="text-xs text-muted-foreground text-center">
+                            Embedding data... Please wait while we securely hide your content.
                           </p>
                         </div>
                       )}
@@ -1551,11 +1615,14 @@ export default function General() {
                     </CardHeader>
                     <CardContent className="space-y-6">
                       {isProcessing && (
-                        <div className="space-y-2">
-                          <Label>Extraction Progress</Label>
-                          <Progress value={progress} className="w-full" />
-                          <p className="text-sm text-muted-foreground">
-                            Extracting hidden data... {progress}%
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-sm font-medium">Extraction Progress</Label>
+                            <span className="text-sm font-semibold text-primary">{Math.round(progress)}%</span>
+                          </div>
+                          <Progress value={progress} className="w-full h-3" />
+                          <p className="text-xs text-muted-foreground text-center">
+                            Extracting hidden data... Recovering your secure content.
                           </p>
                         </div>
                       )}

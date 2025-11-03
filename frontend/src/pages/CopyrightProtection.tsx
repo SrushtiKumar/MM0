@@ -33,7 +33,9 @@ import {
   Calendar,
   Settings,
   RefreshCw,
-  EyeOff
+  EyeOff,
+  Copy,
+  Key
 } from "lucide-react";
 
 // API Configuration
@@ -127,8 +129,12 @@ export default function CopyrightProtection() {
 
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [savePasswordWithProject, setSavePasswordWithProject] = useState(false);
+  const [savedPassword, setSavedPassword] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [progressCompleted, setProgressCompleted] = useState(false);
+  const [progressInterval, setProgressInterval] = useState<NodeJS.Timeout | null>(null);
   const [operationResult, setOperationResult] = useState<OperationResult | null>(null);
   const [currentOperationId, setCurrentOperationId] = useState<string | null>(null);
   const [supportedFormats, setSupportedFormats] = useState<SupportedFormats | null>(null);
@@ -157,6 +163,32 @@ export default function CopyrightProtection() {
     fetchSupportedFormats();
   }, [navigate]);
 
+  // Safe progress setter that prevents backwards movement after completion
+  const setSafeProgress = (value: number | ((prev: number) => number)) => {
+    if (progressCompleted) return; // Don't update progress if already completed
+    
+    if (typeof value === 'function') {
+      setProgress(prev => {
+        const newValue = value(prev);
+        if (newValue >= 100) {
+          setProgressCompleted(true);
+        }
+        return Math.max(prev, newValue); // Never go backwards
+      });
+    } else {
+      if (value >= 100) {
+        setProgressCompleted(true);
+      }
+      setProgress(prev => Math.max(prev, value)); // Never go backwards
+    }
+  };
+
+  // Reset progress state for new operations
+  const resetProgress = () => {
+    setProgress(0);
+    setProgressCompleted(false);
+  };
+
   const fetchSupportedFormats = async () => {
     try {
       console.log("📡 Fetching supported formats from:", `${API_BASE_URL}/supported-formats`);
@@ -184,6 +216,60 @@ export default function CopyrightProtection() {
     }
   };
 
+  const simulateProgress = () => {
+    resetProgress();
+    let currentProgress = 0;
+    
+    const interval = setInterval(() => {
+      currentProgress += Math.random() * 15 + 5; // Progress by 5-20% each step
+      if (currentProgress >= 95) {
+        currentProgress = 95; // Cap at 95% until real completion
+        clearInterval(interval);
+      }
+      setSafeProgress(Math.min(currentProgress, 95));
+    }, 500); // Update every 500ms for smooth animation
+    
+    setProgressInterval(interval);
+  };
+
+  const stopProgressSimulation = () => {
+    if (progressInterval) {
+      clearInterval(progressInterval);
+      setProgressInterval(null);
+    }
+  };
+
+  const savePasswordWithProjectSettings = () => {
+    if (savePasswordWithProject && password.trim()) {
+      setSavedPassword(password);
+      toast.success("Password saved with project settings!");
+    } else if (!savePasswordWithProject) {
+      setSavedPassword("");
+      toast.success("Password removed from project settings!");
+    }
+  };
+
+  const loadSavedPassword = () => {
+    if (savedPassword) {
+      setPassword(savedPassword);
+      toast.success("Loaded saved password from project!");
+    } else {
+      toast.error("No saved password found in project settings");
+    }
+  };
+
+  const copyPasswordToClipboard = async () => {
+    if (password) {
+      try {
+        await navigator.clipboard.writeText(password);
+        toast.success("Password copied to clipboard!");
+      } catch (error) {
+        console.error("Failed to copy password:", error);
+        toast.error("Failed to copy password to clipboard");
+      }
+    }
+  };
+
   // Polling function for operation status
   const pollOperationStatus = async (operationId: string) => {
     const maxAttempts = 120; // 2 minutes with 1-second intervals
@@ -199,17 +285,25 @@ export default function CopyrightProtection() {
         }
 
         const status = await response.json();
-        setProgress(status.progress);
+        if (status.progress !== undefined) {
+          // Never allow progress to go backwards
+          setSafeProgress(status.progress);
+        }
 
         if (status.status === 'completed') {
-          setIsProcessing(false);
-          // Set success to true since status is 'completed'
-          setOperationResult({
-            ...status.result,
-            success: true
-          });
-          toast.success("Operation completed successfully!");
+          stopProgressSimulation();
+          setSafeProgress(100); // Ensure it shows 100% on completion
+          setTimeout(() => {
+            setIsProcessing(false);
+            // Set success to true since status is 'completed'
+            setOperationResult({
+              ...status.result,
+              success: true
+            });
+            toast.success("Operation completed successfully!");
+          }, 500); // Small delay to show 100% before showing results
         } else if (status.status === 'failed') {
+          stopProgressSimulation();
           setIsProcessing(false);
           // Set success to false since status is 'failed'
           setOperationResult({
@@ -220,10 +314,12 @@ export default function CopyrightProtection() {
         } else if (attempts < maxAttempts) {
           setTimeout(poll, 1000);
         } else {
+          stopProgressSimulation();
           setIsProcessing(false);
           toast.error("Operation timed out");
         }
       } catch (error) {
+        stopProgressSimulation();
         console.error("Polling error:", error);
         if (attempts < maxAttempts) {
           setTimeout(poll, 1000);
@@ -333,9 +429,12 @@ export default function CopyrightProtection() {
 
     console.log("🚀 Starting embed process...");
     setIsProcessing(true);
-    setProgress(0);
+    resetProgress();
     setOperationResult(null);
     setCurrentOperationId(null);
+    
+    // Start progress simulation for smooth animation
+    simulateProgress();
     
     try {
       const formData = new FormData();
@@ -453,9 +552,12 @@ export default function CopyrightProtection() {
     }
 
     setIsProcessing(true);
-    setProgress(0);
+    resetProgress();
     setOperationResult(null);
     setCurrentOperationId(null);
+    
+    // Start progress simulation for smooth animation
+    simulateProgress();
     
     try {
       const formData = new FormData();
@@ -510,10 +612,10 @@ export default function CopyrightProtection() {
     }
   };
 
-  // Download result file
-  const downloadResult = async () => {
+  // Enhanced download with custom save dialog (same implementation as General page)
+  const saveAsResult = async () => {
     if (!currentOperationId) {
-      toast.error("No operation ID available for download");
+      toast.error("No operation result to download");
       return;
     }
 
@@ -521,26 +623,135 @@ export default function CopyrightProtection() {
       const response = await fetch(`${API_BASE_URL}/operations/${currentOperationId}/download`);
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(`Failed to download: ${response.statusText}`);
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = operationResult?.filename || operationResult?.output_filename || 'copyright_result.zip';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
       
-      toast.success("File downloaded successfully!");
-    } catch (error) {
-      console.error("Download error:", error);
-      toast.error("Failed to download file");
+      // Determine default filename
+      let defaultFilename;
+      if (selectedTab === 'embed') {
+        defaultFilename = operationResult?.output_filename || operationResult?.filename || 'copyright_embedded_file';
+        // Ensure extension matches carrier file if available
+        if (!defaultFilename.includes('.') && carrierFile) {
+          const originalExt = carrierFile.name.split('.').pop();
+          defaultFilename += `.${originalExt}`;
+        }
+      } else if (selectedTab === 'extract') {
+        defaultFilename = operationResult?.extracted_filename || 'copyright_extracted_content.txt';
+      } else {
+        defaultFilename = 'copyright_result.bin';
+      }
+      
+      // Try to use the modern File System Access API
+      if ('showSaveFilePicker' in window) {
+        try {
+          // Get the file extension from the default filename
+          const lastDotIndex = defaultFilename.lastIndexOf('.');
+          const extension = (lastDotIndex > 0 && lastDotIndex < defaultFilename.length - 1) 
+            ? defaultFilename.substring(lastDotIndex + 1).toLowerCase()
+            : '';
+          
+          const fileTypeMap: { [key: string]: any } = {
+            'mp4': { description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } },
+            'avi': { description: 'AVI Video', accept: { 'video/avi': ['.avi'] } },
+            'wav': { description: 'WAV Audio', accept: { 'audio/wav': ['.wav'] } },
+            'mp3': { description: 'MP3 Audio', accept: { 'audio/mp3': ['.mp3'] } },
+            'jpg': { description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg', '.jpeg'] } },
+            'jpeg': { description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg', '.jpeg'] } },
+            'png': { description: 'PNG Image', accept: { 'image/png': ['.png'] } },
+            'pdf': { description: 'PDF Document', accept: { 'application/pdf': ['.pdf'] } },
+            'doc': { description: 'Word Document', accept: { 'application/msword': ['.doc'] } },
+            'docx': { description: 'Word Document', accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } },
+            'txt': { description: 'Text File', accept: { 'text/plain': ['.txt'] } },
+            'zip': { description: 'ZIP Archive', accept: { 'application/zip': ['.zip'] } }
+          };
+
+          // Get file type or create a proper fallback
+          let fileType = fileTypeMap[extension.toLowerCase()];
+          
+          if (!fileType) {
+            if (extension && extension.length > 0) {
+              fileType = {
+                description: `${extension.toUpperCase()} File`,
+                accept: { [`application/${extension}`]: [`.${extension}`] }
+              };
+            } else {
+              fileType = {
+                description: 'All Files',
+                accept: { '*/*': [] }
+              };
+            }
+          }
+
+          // Show the save dialog
+          const fileHandle = await (window as any).showSaveFilePicker({
+            suggestedName: defaultFilename,
+            types: [fileType]
+          });
+
+          // Write the file
+          const writableStream = await fileHandle.createWritable();
+          await writableStream.write(blob);
+          await writableStream.close();
+
+          toast.success(`File saved successfully as "${fileHandle.name}"!`);
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            toast.error("Save operation was cancelled");
+            return;
+          }
+          throw error; // Fall back to traditional download
+        }
+      } else {
+        // Fallback for browsers that don't support File System Access API
+        const customFilename = prompt(
+          `Enter filename to save as (current: ${defaultFilename}):`,
+          defaultFilename
+        );
+        
+        if (customFilename === null) {
+          toast.error("Download cancelled");
+          return;
+        }
+
+        const finalFilename = customFilename.trim() || defaultFilename;
+        
+        // Traditional download with custom filename
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = finalFilename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        toast.success(`File downloaded as "${finalFilename}"!`);
+      }
+    } catch (error: any) {
+      // Final fallback - traditional download with original filename
+      try {
+        const blob = await (await fetch(`${API_BASE_URL}/operations/${currentOperationId}/download`)).blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = operationResult?.filename || `copyright_result_${Date.now()}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        toast.success("File downloaded successfully (fallback mode)!");
+      } catch (fallbackError: any) {
+        toast.error(fallbackError.message || "Failed to download result");
+        console.error("Download fallback error:", fallbackError);
+      }
     }
   };
+
+      // Removed orphaned debug code
+      
+
 
   // Utility function to format file sizes
   const formatFileSize = (bytes: number): string => {
@@ -575,14 +786,48 @@ export default function CopyrightProtection() {
     toast.success("Password generated successfully!");
   };
 
-  // Download copyright information as JSON file
-  const downloadCopyrightInfo = (copyrightData: any) => {
+  // Save copyright information as JSON file with custom name and location
+  const saveAsCopyrightInfo = async (copyrightData: any) => {
     const dataStr = JSON.stringify(copyrightData, null, 2);
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const defaultFilename = `copyright-info-${copyrightData.author_name?.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+    
+    // Check if browser supports File System Access API
+    if ('showSaveFilePicker' in window) {
+      try {
+        const fileHandle = await (window as any).showSaveFilePicker({
+          suggestedName: defaultFilename,
+          types: [
+            {
+              description: 'JSON Files',
+              accept: { 'application/json': ['.json'] }
+            },
+            {
+              description: 'All Files',
+              accept: { '*/*': ['.*'] }
+            }
+          ]
+        });
+        
+        const writable = await fileHandle.createWritable();
+        await writable.write(dataBlob);
+        await writable.close();
+        
+        toast.success(`Copyright information saved as "${fileHandle.name}"!`);
+        return;
+      } catch (error: any) {
+        // User cancelled the dialog or API failed, fall back to traditional download
+        if (error.name !== 'AbortError') {
+          console.warn('Save file picker failed, falling back to download:', error);
+        }
+      }
+    }
+    
+    // Fallback: Traditional download method
     const url = URL.createObjectURL(dataBlob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `copyright-info-${copyrightData.author_name?.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+    link.download = defaultFilename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -835,10 +1080,58 @@ export default function CopyrightProtection() {
                               <RefreshCw className="h-4 w-4 mr-2" />
                               Generate
                             </Button>
+                            {password && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={copyPasswordToClipboard}
+                                className="shrink-0"
+                                title="Copy password to clipboard"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            Uses AES-256-GCM encryption for maximum security
-                          </p>
+                          
+                          {/* Password Management Options */}
+                          <div className="space-y-2">
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                id="save-password-with-project-copyright"
+                                checked={savePasswordWithProject}
+                                onChange={(e) => {
+                                  setSavePasswordWithProject(e.target.checked);
+                                  if (e.target.checked && password.trim()) {
+                                    setSavedPassword(password);
+                                    toast.success("Password will be saved with project!");
+                                  } else if (!e.target.checked) {
+                                    setSavedPassword("");
+                                  }
+                                }}
+                                className="rounded"
+                              />
+                              <Label htmlFor="save-password-with-project-copyright" className="text-sm">
+                                Save password with project settings
+                              </Label>
+                            </div>
+                            
+                            {savedPassword && (
+                              <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                                <Shield className="h-4 w-4 text-green-600" />
+                                <span className="text-sm text-muted-foreground">Password saved with project</span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={loadSavedPassword}
+                                  className="ml-auto h-6 px-2 text-xs"
+                                >
+                                  Load
+                                </Button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -910,10 +1203,61 @@ export default function CopyrightProtection() {
                           >
                             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                           </Button>
+                          {password.trim() && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={copyPasswordToClipboard}
+                              className="shrink-0"
+                              title="Copy password to clipboard"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground">
                           Uses AES-256-GCM decryption
                         </p>
+                        
+                        {/* Password Management Options */}
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="save-password-with-project-extract"
+                              checked={savePasswordWithProject}
+                              onChange={(e) => {
+                                setSavePasswordWithProject(e.target.checked);
+                                if (e.target.checked && password.trim()) {
+                                  setSavedPassword(password);
+                                  toast.success("Password will be saved with project!");
+                                } else if (!e.target.checked) {
+                                  setSavedPassword("");
+                                }
+                              }}
+                              className="rounded"
+                            />
+                            <Label htmlFor="save-password-with-project-extract" className="text-sm">
+                              Save password with project settings
+                            </Label>
+                          </div>
+                          
+                          {savedPassword && (
+                            <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
+                              <Shield className="h-4 w-4 text-green-600" />
+                              <span className="text-sm text-muted-foreground">Password saved with project</span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={loadSavedPassword}
+                                className="ml-auto h-6 px-2 text-xs"
+                              >
+                                Load
+                              </Button>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <Button 
@@ -970,6 +1314,93 @@ export default function CopyrightProtection() {
                         </div>
                       </div>
                       
+                      {/* Password Management Section */}
+                      <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                        <h4 className="text-sm font-semibold flex items-center gap-2">
+                          <Shield className="h-4 w-4" />
+                          Password Management
+                        </h4>
+                        
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <Label htmlFor="project-password">Project Password</Label>
+                            <div className="flex gap-2">
+                              <div className="relative flex-1">
+                                <Input
+                                  id="project-password"
+                                  type={showPassword ? "text" : "password"}
+                                  value={password}
+                                  onChange={(e) => setPassword(e.target.value)}
+                                  placeholder="Enter or generate password"
+                                  className="pr-10"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-muted"
+                                >
+                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={generatePassword}
+                                className="shrink-0"
+                                title="Generate Password"
+                              >
+                                <Key className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={copyPasswordToClipboard}
+                                className="shrink-0"
+                                disabled={!password.trim()}
+                                title="Copy Password"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="save-password-project-tab"
+                              checked={savePasswordWithProject}
+                              onChange={(e) => {
+                                setSavePasswordWithProject(e.target.checked);
+                                if (e.target.checked && password.trim()) {
+                                  setSavedPassword(password);
+                                  toast.success("Password saved with project settings!");
+                                } else if (!e.target.checked) {
+                                  setSavedPassword("");
+                                  toast.success("Password removed from project settings!");
+                                }
+                              }}
+                              className="rounded"
+                            />
+                            <Label htmlFor="save-password-project-tab" className="text-sm">
+                              Save password with this project
+                            </Label>
+                          </div>
+                          
+                          {savedPassword && (
+                            <div className="p-2 bg-green-50 border border-green-200 rounded-lg">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-green-600" />
+                                <span className="text-sm text-green-700">
+                                  Password saved with project ({savedPassword.length} characters)
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
                       <Alert>
                         <Info className="h-4 w-4" />
                         <AlertDescription>
@@ -987,10 +1418,13 @@ export default function CopyrightProtection() {
                   <CardContent className="pt-6">
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
-                        <Label className="text-sm font-medium">Processing...</Label>
-                        <span className="text-sm text-muted-foreground">{progress}%</span>
+                        <Label className="text-sm font-medium">Processing Copyright Protection...</Label>
+                        <span className="text-sm font-semibold text-primary">{Math.round(progress)}%</span>
                       </div>
-                      <Progress value={progress} className="w-full" />
+                      <Progress value={progress} className="w-full h-3" />
+                      <p className="text-xs text-muted-foreground text-center">
+                        Embedding copyright data... Securing your intellectual property.
+                      </p>
                     </div>
                   </CardContent>
                 </Card>
@@ -1049,11 +1483,11 @@ export default function CopyrightProtection() {
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => downloadCopyrightInfo(copyrightData)}
+                                        onClick={() => saveAsCopyrightInfo(copyrightData)}
                                         className="text-green-700 border-green-300 hover:bg-green-100"
                                       >
                                         <Download className="h-4 w-4 mr-2" />
-                                        Download JSON
+                                        Save As JSON...
                                       </Button>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
@@ -1094,14 +1528,21 @@ export default function CopyrightProtection() {
                         </div>
                       </div>
                       
-                      <Button 
-                        onClick={downloadResult} 
-                        className="w-full"
-                        disabled={!currentOperationId}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download Result
-                      </Button>
+                      <div className="space-y-2">
+                        <Button 
+                          onClick={saveAsResult} 
+                          className="w-full bg-primary hover:bg-primary/90"
+                          disabled={!currentOperationId}
+                          title="Save your file with custom location and filename"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          💾 Save As... (Choose Where & What Name)
+                        </Button>
+                        
+
+                      </div>
+                      
+
                     </div>
                   </CardContent>
                 </Card>

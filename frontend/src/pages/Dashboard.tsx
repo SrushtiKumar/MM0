@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Link } from "react-router-dom";
 import { 
   Plus, 
@@ -32,8 +33,13 @@ export default function Dashboard() {
   const [selectedTab, setSelectedTab] = useState("projects");
   const [projects, setProjects] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
+
+  const handleProjectTypeSelect = (type: string) => {
+    setIsProjectModalOpen(false);
+    navigate(`/${type}`);
+  };
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -137,8 +143,7 @@ export default function Dashboard() {
   const stats = {
     totalProjects: projects.length,
     activeProjects: projects.length,
-    processedFiles: 0,
-    dataProtected: "0 KB"
+    processedFiles: 0
   };
 
   return (
@@ -157,11 +162,78 @@ export default function Dashboard() {
                 </p>
               </div>
               
-              <div className="animate-fade-in [animation-delay:200ms]">
-                <Button onClick={() => navigate('/general')} size="lg" className="btn-primary">
-                  <Plus className="mr-2 h-4 w-4" />
-                  New Project
+              <div className="animate-fade-in [animation-delay:200ms] flex gap-3">
+                <Button asChild size="lg" variant="outline">
+                  <Link to="/home#demo">
+                    <Eye className="mr-2 h-4 w-4" />
+                    Watch Demo
+                  </Link>
                 </Button>
+                <Dialog open={isProjectModalOpen} onOpenChange={setIsProjectModalOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="lg" className="btn-primary">
+                      <Plus className="mr-2 h-4 w-4" />
+                      New Project
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+                    <DialogHeader className="pb-4 space-y-2">
+                      <DialogTitle className="text-xl font-bold text-center">Create New Project</DialogTitle>
+                      <DialogDescription className="text-center text-sm text-muted-foreground">
+                        Choose the type of steganography project you'd like to create
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <Button
+                        onClick={() => handleProjectTypeSelect('general')}
+                        variant="outline"
+                        className="group w-full flex items-center h-auto p-4 text-left hover:bg-primary/10 hover:border-primary/50 transition-all duration-300"
+                      >
+                        <div className="mr-4 p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors flex-shrink-0">
+                          <FileImage className="h-5 w-5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-base mb-1 group-hover:text-primary transition-colors">General Steganography</div>
+                          <div className="text-xs text-muted-foreground leading-tight">
+                            Hide any type of data in images, audio, or video files
+                          </div>
+                        </div>
+                      </Button>
+                      
+                      <Button
+                        onClick={() => handleProjectTypeSelect('copyright')}
+                        variant="outline"
+                        className="group w-full flex items-center h-auto p-4 text-left hover:bg-primary/10 hover:border-primary/50 transition-all duration-300"
+                      >
+                        <div className="mr-4 p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors flex-shrink-0">
+                          <Shield className="h-5 w-5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-base mb-1 group-hover:text-primary transition-colors">Copyright Protection</div>
+                          <div className="text-xs text-muted-foreground leading-tight">
+                            Embed copyright information to protect your property
+                          </div>
+                        </div>
+                      </Button>
+                      
+                      <Button
+                        onClick={() => handleProjectTypeSelect('forensic')}
+                        variant="outline"
+                        className="group w-full flex items-center h-auto p-4 text-left hover:bg-primary/10 hover:border-primary/50 transition-all duration-300"
+                      >
+                        <div className="mr-4 p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors flex-shrink-0">
+                          <Lock className="h-5 w-5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-base mb-1 group-hover:text-primary transition-colors">Forensic Evidence</div>
+                          <div className="text-xs text-muted-foreground leading-tight">
+                            Securely embed forensic data and evidence in files
+                          </div>
+                        </div>
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
           </div>
@@ -170,7 +242,7 @@ export default function Dashboard() {
         {/* Stats Cards */}
         <section className="py-8">
           <div className="container">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card className="animate-fade-in">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
@@ -203,18 +275,6 @@ export default function Dashboard() {
                       <p className="text-2xl font-bold text-blue-600">{stats.processedFiles}</p>
                     </div>
                     <BarChart3 className="h-8 w-8 text-blue-600" />
-                  </div>
-                </CardContent>
-              </Card>
-              
-              <Card className="animate-fade-in [animation-delay:300ms]">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Data Protected</p>
-                      <p className="text-2xl font-bold text-blue-600">{stats.dataProtected}</p>
-                    </div>
-                    <Shield className="h-8 w-8 text-blue-600" />
                   </div>
                 </CardContent>
               </Card>

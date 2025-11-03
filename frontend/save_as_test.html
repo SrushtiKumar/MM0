@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Save As Dialog Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 10px 5px;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #f9f9f9;
+        }
+        .success { border-color: #28a745; background: #d4edda; }
+        .error { border-color: #dc3545; background: #f8d7da; }
+        .info { border-color: #17a2b8; background: #d1ecf1; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📁 File System Access API - Save As Dialog Test</h1>
+        <p>This page tests the Save As functionality used in the Copyright Protection page.</p>
+        
+        <div style="margin: 20px 0;">
+            <button id="checkSupport">🔍 Check API Support</button>
+            <button id="testSaveAs">💾 Test Save As Dialog</button>
+            <button id="testWithPrompt">📝 Test with Filename Prompt</button>
+        </div>
+        
+        <div id="result" class="result"></div>
+        
+        <div style="margin-top: 30px; padding: 20px; border: 1px solid #e9ecef; border-radius: 6px;">
+            <h3>🎯 How it should work:</h3>
+            <ol>
+                <li><strong>Modern Browsers (Chrome 86+, Edge 86+):</strong> Shows a native Save As dialog where you can choose location and filename</li>
+                <li><strong>Other Browsers:</strong> Prompts for filename, then downloads to default folder</li>
+                <li><strong>All Browsers:</strong> Provides user control over filename at minimum</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        const resultDiv = document.getElementById('result');
+        
+        function showResult(message, type = 'info') {
+            resultDiv.className = `result ${type}`;
+            resultDiv.innerHTML = message;
+        }
+        
+        document.getElementById('checkSupport').addEventListener('click', () => {
+            console.log('🔍 Checking Save As API Support...');
+            
+            const hasAPI = 'showSaveFilePicker' in window;
+            const isSecure = window.isSecureContext;
+            const canUseAPI = hasAPI && isSecure;
+            
+            let message = '<h3>🔍 API Support Status:</h3>';
+            message += `<p><strong>File System Access API:</strong> ${hasAPI ? '✅ Available' : '❌ Not Available'}</p>`;
+            message += `<p><strong>Secure Context (HTTPS/localhost):</strong> ${isSecure ? '✅ Yes' : '❌ No'}</p>`;
+            message += `<p><strong>Full Save As Dialog:</strong> ${canUseAPI ? '✅ Supported' : '❌ Not Supported'}</p>`;
+            message += `<p><strong>Browser:</strong> ${navigator.userAgent.split(' ').pop()}</p>`;
+            message += `<p><strong>Protocol:</strong> ${window.location.protocol}</p>`;
+            
+            if (canUseAPI) {
+                message += '<p style="color: green;">✅ Your browser fully supports Save As dialogs!</p>';
+            } else {
+                message += '<p style="color: orange;">⚠️ Limited support - will use filename prompt + download fallback</p>';
+            }
+            
+            showResult(message, canUseAPI ? 'success' : 'info');
+        });
+        
+        document.getElementById('testSaveAs').addEventListener('click', async () => {
+            if (!('showSaveFilePicker' in window && window.isSecureContext)) {
+                showResult('❌ File System Access API not supported. Use "Test with Filename Prompt" instead.', 'error');
+                return;
+            }
+            
+            try {
+                // Create test content
+                const testContent = `Test file created at: ${new Date().toISOString()}\n\nThis demonstrates the Save As functionality used in the Copyright Protection page.\n\nThe user can choose:\n- Where to save the file\n- What to name the file\n- File format (if multiple supported)`;
+                const blob = new Blob([testContent], { type: 'text/plain' });
+                
+                showResult('💾 Opening Save As dialog... Choose your location and filename!', 'info');
+                
+                // Show Save As dialog
+                const fileHandle = await window.showSaveFilePicker({
+                    suggestedName: 'copyright-test-file.txt',
+                    types: [
+                        {
+                            description: 'Text Files',
+                            accept: { 'text/plain': ['.txt'] }
+                        },
+                        {
+                            description: 'All Files',
+                            accept: { '*/*': ['.*'] }
+                        }
+                    ],
+                    startIn: 'downloads'
+                });
+                
+                // Write the file
+                const writable = await fileHandle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                
+                showResult(`✅ SUCCESS! File saved as "${fileHandle.name}" at your chosen location!`, 'success');
+                
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    showResult('ℹ️ Save cancelled by user', 'info');
+                } else {
+                    showResult(`❌ Error: ${error.message}`, 'error');
+                    console.error('Save As error:', error);
+                }
+            }
+        });
+        
+        document.getElementById('testWithPrompt').addEventListener('click', () => {
+            try {
+                // Create test content
+                const testContent = `Test file with prompt created at: ${new Date().toISOString()}\n\nThis demonstrates the fallback Save As functionality.\n\nUser gets to choose the filename via prompt.`;
+                const blob = new Blob([testContent], { type: 'text/plain' });
+                
+                // Prompt for filename
+                const userFilename = prompt('Choose a filename for your test file:', 'copyright-test-prompt.txt');
+                
+                if (userFilename === null) {
+                    showResult('ℹ️ Save cancelled by user', 'info');
+                    return;
+                }
+                
+                const filename = userFilename.trim() || 'copyright-test-default.txt';
+                
+                // Create download
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showResult(`✅ File "${filename}" is downloading to your Downloads folder!`, 'success');
+                
+            } catch (error) {
+                showResult(`❌ Error: ${error.message}`, 'error');
+                console.error('Download error:', error);
+            }
+        });
+        
+        // Auto-check support on load
+        setTimeout(() => {
+            document.getElementById('checkSupport').click();
+        }, 500);
+    </script>
+</body>
+</html>
