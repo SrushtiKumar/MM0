@@ -1938,7 +1938,7 @@ async def process_embed_operation(
             os.remove(content_file_path)
             
     except Exception as e:
-        error_msg = translate_error_message(str(e))
+        error_msg = translate_error_message(str(e), carrier_type)
         update_job_status(operation_id, "failed", error=error_msg)
         
         # Log failure in database
@@ -2071,6 +2071,7 @@ async def process_batch_embed_operation(
                     carrier_file_path,
                     content_to_hide,
                     str(output_path),
+                    password,  # Pass password as 4th parameter
                     is_file,
                     original_filename
                 )
@@ -2079,6 +2080,7 @@ async def process_batch_embed_operation(
                     carrier_file_path,
                     content_to_hide,
                     str(output_path),
+                    password,  # Pass password as 4th parameter
                     is_file
                 )
             success = result.get("success", False)
@@ -2919,7 +2921,7 @@ async def process_extract_operation(
         os.remove(stego_file_path)
         
     except Exception as e:
-        error_msg = translate_error_message(str(e))
+        error_msg = translate_error_message(str(e), carrier_type)
         update_job_status(operation_id, "failed", error=error_msg)
         
         # Log failure in database
@@ -2935,12 +2937,25 @@ def get_steganography_manager(carrier_type: str, password: str = ""):
     """Get appropriate steganography manager based on carrier type"""
     manager_class = steganography_managers.get(carrier_type)
     if manager_class:
-        # Try to create with password parameter
-        try:
-            return manager_class(password=password)
-        except TypeError:
-            # Fallback for managers that don't take password in constructor
+        # Different managers have different constructor signatures
+        if carrier_type in ['image', 'document']:
+            # UniversalFileSteganography doesn't take password in constructor
             return manager_class()
+        elif carrier_type == 'audio':
+            # UniversalFileAudio may take password in constructor
+            try:
+                return manager_class(password=password)
+            except TypeError:
+                return manager_class()
+        elif carrier_type == 'video':
+            # FinalVideoSteganographyManager doesn't take password in constructor
+            return manager_class()
+        else:
+            # Fallback - try with password first, then without
+            try:
+                return manager_class(password=password)
+            except TypeError:
+                return manager_class()
     return None
 
 # ============================================================================

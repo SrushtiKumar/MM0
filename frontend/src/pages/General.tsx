@@ -116,10 +116,8 @@ export default function General() {
   const [textContent, setTextContent] = useState("");
   const [fileContent, setFileContent] = useState<File | null>(null);
   
-  // Copyright fields state
-  const [authorName, setAuthorName] = useState("");
-  const [timestamp, setTimestamp] = useState("");
-  const [copyrightAlias, setCopyrightAlias] = useState("");
+
+
   
   const [password, setPassword] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -451,17 +449,7 @@ export default function General() {
       return;
     }
 
-    if (contentType === "copyright") {
-      if (!authorName.trim()) {
-        toast.error("Please enter the author name");
-        return;
-      }
-      if (!copyrightAlias.trim()) {
-        toast.error("Please enter the copyright alias");
-        return;
-      }
-      // Timestamp is optional - will be auto-generated if empty
-    }
+
 
     if ((contentType === "file" || contentType === "image" || contentType === "video" || contentType === "audio" || contentType === "document") && !fileContent) {
       toast.error(`Please select a ${contentType} to hide`);
@@ -520,16 +508,6 @@ export default function General() {
 
       if (contentType === "text") {
         formData.append('text_content', textContent);
-      } else if (contentType === "copyright") {
-        // Create copyright JSON object
-        const copyrightData = {
-          author_name: authorName.trim(),
-          copyright_alias: copyrightAlias.trim(),
-          timestamp: timestamp.trim() || new Date().toISOString()
-        };
-        formData.append('text_content', JSON.stringify(copyrightData));
-        // Set content_type to "text" for backend compatibility since we're sending JSON as text
-        formData.set('content_type', 'text');
       } else if (contentType === "file" || contentType === "image" || contentType === "video" || contentType === "audio" || contentType === "document") {
         formData.append('content_file', fileContent);
         // Set content_type to "file" for all file types for backend compatibility
@@ -968,7 +946,7 @@ export default function General() {
   const getContentIcon = () => {
     switch (contentType) {
       case "text": return <FileText className="h-4 w-4" />;
-      case "copyright": return <Shield className="h-4 w-4" />;
+
       case "image": return <ImageIcon className="h-4 w-4" />;
       case "audio": return <Music className="h-4 w-4" />;
       case "video": return <Video className="h-4 w-4" />;
@@ -977,18 +955,7 @@ export default function General() {
     }
   };
 
-  // Helper function to parse and validate copyright data
-  const parseCopyrightData = (textContent: string) => {
-    try {
-      const data = JSON.parse(textContent);
-      if (data.author_name && data.copyright_alias && data.timestamp) {
-        return data;
-      }
-    } catch (e) {
-      // Not valid JSON or missing required fields
-    }
-    return null;
-  };
+
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -1215,12 +1182,6 @@ export default function General() {
                                 Document File
                               </div>
                             </SelectItem>
-                            <SelectItem value="copyright">
-                              <div className="flex items-center gap-2">
-                                <Shield className="h-4 w-4" />
-                                Copyright Information
-                              </div>
-                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1239,60 +1200,7 @@ export default function General() {
                         </div>
                       )}
 
-                      {contentType === "copyright" && (
-                        <div className="space-y-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Shield className="h-5 w-5 text-blue-600" />
-                            <Label className="text-lg font-medium">Copyright Information</Label>
-                          </div>
-                          
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label htmlFor="author-name">Author Name</Label>
-                              <Input
-                                id="author-name"
-                                value={authorName}
-                                onChange={(e) => setAuthorName(e.target.value)}
-                                placeholder="Enter author's full name..."
-                              />
-                            </div>
-                            
-                            <div className="space-y-2">
-                              <Label htmlFor="copyright-alias">Copyright Alias</Label>
-                              <Input
-                                id="copyright-alias"
-                                value={copyrightAlias}
-                                onChange={(e) => setCopyrightAlias(e.target.value)}
-                                placeholder="Enter copyright alias or company..."
-                              />
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-2">
-                            <Label htmlFor="timestamp">Timestamp</Label>
-                            <div className="flex gap-2">
-                              <Input
-                                id="timestamp"
-                                value={timestamp}
-                                onChange={(e) => setTimestamp(e.target.value)}
-                                placeholder="Enter custom timestamp or leave for auto-generated..."
-                                className="flex-1"
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => setTimestamp(new Date().toISOString())}
-                                className="shrink-0"
-                              >
-                                Use Current Time
-                              </Button>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              Current time will be used if left empty. Format: ISO 8601 (e.g., {new Date().toISOString()})
-                            </p>
-                          </div>
-                        </div>
-                      )}
+
 
                       {(contentType === "file" || contentType === "image" || contentType === "video" || contentType === "audio" || contentType === "document") && (
                         <div className="space-y-2">
@@ -1676,31 +1584,16 @@ export default function General() {
                               {operationResult.file_size && (
                                 <p className="text-sm"><strong>File Size:</strong> {formatFileSize(operationResult.file_size)}</p>
                               )}
-                              {(operationResult.text_content || operationResult.preview) && (() => {
-                                const textData = operationResult.text_content || operationResult.preview;
-                                const copyrightData = parseCopyrightData(textData);
-                                
-                                if (copyrightData) {
-                                  // Display copyright information in simple vertical format
-                                  return (
-                                    <div className="space-y-1">
-                                      <p className="text-sm">Author name: {copyrightData.author_name}</p>
-                                      <p className="text-sm">Copyright alias: {copyrightData.copyright_alias}</p>
-                                      <p className="text-sm">Timestamp: {new Date(copyrightData.timestamp).toLocaleString()}</p>
-                                    </div>
-                                  );
-                                } else {
-                                  // Display regular text content
-                                  return (
-                                    <div className="space-y-1">
-                                      <p className="text-sm font-medium">Text Content:</p>
-                                      <div className="p-2 bg-background rounded border max-h-32 overflow-y-auto">
-                                        <pre className="text-xs font-mono whitespace-pre-wrap">{textData}</pre>
-                                      </div>
-                                    </div>
-                                  );
-                                }
-                              })()}
+                              {(operationResult.text_content || operationResult.preview) && (
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium">Text Content:</p>
+                                  <div className="p-2 bg-background rounded border max-h-32 overflow-y-auto">
+                                    <pre className="text-xs font-mono whitespace-pre-wrap">
+                                      {operationResult.text_content || operationResult.preview}
+                                    </pre>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
                           

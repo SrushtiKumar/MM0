@@ -21,7 +21,7 @@ def test_all_modules_direct():
     # Test 1: Image Steganography
     print("1. Testing Image Steganography...")
     try:
-        image_stego = UniversalFileSteganography(password="test123")
+        image_stego = UniversalFileSteganography()  # No password in constructor
         # Try multiple possible image files
         possible_images = ["carrier_test_image.png", "test_image.png", "image_test.png"]
         image_path = None
@@ -32,11 +32,12 @@ def test_all_modules_direct():
         
         if image_path:
             result = image_stego.hide_data(
-                image_path, "Test Image Message", "test_final_image.png", is_file=False
+                image_path, "Test Image Message", "test_final_image.png", 
+                password="test123", is_file=False  # Password goes in hide_data method
             )
             if result.get('success'):
-                extract_result = image_stego.extract_data("test_final_image.png")
-                if extract_result and extract_result[0] == "Test Image Message":
+                extract_result = image_stego.extract_data("test_final_image.png", password="test123")
+                if extract_result and extract_result[0].decode('utf-8') == "Test Image Message":
                     print("   ✅ Image steganography PASSED")
                     results['image'] = True
                 else:
@@ -66,7 +67,7 @@ def test_all_modules_direct():
             )
             if result.get('success'):
                 extract_result = audio_stego.extract_data("test_final_audio.wav")
-                if extract_result and extract_result[0] == "Test Audio Message":
+                if extract_result and extract_result[0].decode('utf-8') == "Test Audio Message":
                     print("   ✅ Audio steganography PASSED")
                     results['audio'] = True
                 else:
@@ -96,7 +97,7 @@ def test_all_modules_direct():
             )
             if result.get('success'):
                 extract_result = video_stego.extract_data("test_final_video.avi")
-                if extract_result and extract_result[0] == "Test Video Message":
+                if extract_result and extract_result[0].decode('utf-8') == "Test Video Message":
                     print("   ✅ Video steganography PASSED")
                     results['video'] = True
                 else:
@@ -117,16 +118,17 @@ def test_all_modules_direct():
     # Test 4: Document Steganography
     print("4. Testing Document Steganography...")
     try:
-        doc_stego = UniversalFileSteganography(password="test123")
+        doc_stego = UniversalFileSteganography()  # No password in constructor
         doc_path = "large_test_document.txt"
         
         if os.path.exists(doc_path):
             result = doc_stego.hide_data(
-                doc_path, "Test Document Message", "test_final_document.txt", is_file=False
+                doc_path, "Test Document Message", "test_final_document.txt", 
+                password="test123", is_file=False  # Password goes in hide_data method
             )
             if result.get('success'):
-                extract_result = doc_stego.extract_data("test_final_document.txt")
-                if extract_result and extract_result[0] == "Test Document Message":
+                extract_result = doc_stego.extract_data("test_final_document.txt", password="test123")
+                if extract_result and extract_result[0].decode('utf-8') == "Test Document Message":
                     print("   ✅ Document steganography PASSED")
                     results['document'] = True
                 else:

@@ -87,6 +87,10 @@ class SteganographyDatabase:
             if 'PGRST205' in error_msg or 'table' in error_msg.lower() and 'schema cache' in error_msg.lower():
                 # Silently continue without database logging - this is optional functionality
                 return None  # Don't log anything, just continue
+            elif '23503' in error_msg and 'user_id_fkey' in error_msg:
+                # Foreign key constraint violation - user doesn't exist, just continue silently
+                print(f"[INFO] User not in database, continuing without logging")
+                return None
             else:
                 print(f"Error logging operation start: {error_msg}")
                 return None
