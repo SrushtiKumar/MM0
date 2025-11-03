@@ -61,7 +61,7 @@ export default function Index() {
     },
     {
       title: "Forensics",
-      description: "Tamper-evident evidence storage and legal document authentication", 
+      description: "Secure evidence storage and legal document authentication", 
       applications: ["Evidence Integrity", "Legal Authentication", "Secure Evidence"]
     },
     {

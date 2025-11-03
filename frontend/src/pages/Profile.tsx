@@ -171,8 +171,16 @@ export default function Profile() {
         <div className="container max-w-2xl">
           <div className="animate-fade-in">
             <div className="flex items-center gap-4 mb-8">
-              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
-                <UserCircle className="h-8 w-8 text-primary" />
+              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center overflow-hidden">
+                {profile.avatar_url ? (
+                  <img 
+                    src={profile.avatar_url} 
+                    alt="Profile Picture" 
+                    className="w-full h-full object-cover rounded-full"
+                  />
+                ) : (
+                  <UserCircle className="h-8 w-8 text-primary" />
+                )}
               </div>
               <div>
                 <h1 className="text-4xl font-bold mb-2">Profile Settings</h1>

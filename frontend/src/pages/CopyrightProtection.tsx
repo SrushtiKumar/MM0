@@ -48,7 +48,7 @@ export default function CopyrightProtection() {
     {
       icon: <Shield className="h-6 w-6 text-primary" />,
       title: "Ownership Proof",
-      description: "Generate tamper-proof certificates of ownership and creation timestamps"
+      description: "Generate integrity-verified certificates of ownership and creation timestamps"
     }
   ];
 
@@ -60,7 +60,7 @@ export default function CopyrightProtection() {
     },
     {
       title: "Photography Rights",
-      description: "Secure your photographs with invisible watermarks and usage tracking",
+      description: "Secure your photographs with invisible watermarks and protection monitoring",
       icon: <Eye className="h-8 w-8 text-primary" />
     },
     {

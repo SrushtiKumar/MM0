@@ -2,13 +2,14 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Github, Linkedin, Mail, Code, Database, Shield } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import profileImage from "@/assets/profile.JPG";
 
 const Developers = () => {
   const developers = [
     {
       name: "SRUSHTI",
       role: "1KS22CG051",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=srushti",
+      avatar: profileImage,
       bio: "Student of 4th year Computer Science and Design, KSIT",
       github: "https://github.com/SrushtiKumar",
       linkedin: "https://www.linkedin.com/in/srushti-kumar-4019652a2/",
@@ -17,7 +18,7 @@ const Developers = () => {
     {
       name: "TRIYA HIREMATH",
       role: "1KS22CG053",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=triya",
+      avatar: profileImage,
       bio: "Student of 4th year Computer Science and Design, KSIT",
       github: "https://github.com/triyaa-h",
       linkedin: "https://www.linkedin.com/in/triya-hiremath-40696b269/",
@@ -26,7 +27,7 @@ const Developers = () => {
     {
       name: "AMITA S",
       role: "1KS22CG003",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=amita",
+      avatar: profileImage,
       bio: "Student of 4th year Computer Science and Design, KSIT",
       github: "https://github.com/aamita1306",
       linkedin: "https://www.linkedin.com/in/amita-s-441444287/",
@@ -99,7 +100,7 @@ const Developers = () => {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground">
-                  Maintain integrity of digital evidence with tamper-proof embedding techniques
+                  Maintain integrity of digital evidence with secure embedding techniques
                 </p>
               </CardContent>
             </Card>

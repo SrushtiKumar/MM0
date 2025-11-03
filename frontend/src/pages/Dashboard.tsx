@@ -128,7 +128,7 @@ export default function Dashboard() {
       case "copyright":
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
       case "forensic":
-        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300";
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
     }
@@ -212,9 +212,9 @@ export default function Dashboard() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Data Protected</p>
-                      <p className="text-2xl font-bold text-purple-600">{stats.dataProtected}</p>
+                      <p className="text-2xl font-bold text-blue-600">{stats.dataProtected}</p>
                     </div>
-                    <Shield className="h-8 w-8 text-purple-600" />
+                    <Shield className="h-8 w-8 text-blue-600" />
                   </div>
                 </CardContent>
               </Card>

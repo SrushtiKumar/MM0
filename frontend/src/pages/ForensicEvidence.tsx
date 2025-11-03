@@ -70,7 +70,7 @@ const ForensicEvidence = () => {
               <FileCheck className="w-12 h-12 text-primary mb-4" />
               <h3 className="text-xl font-semibold mb-2">Evidence Integrity</h3>
               <p className="text-muted-foreground">
-                Ensure digital evidence remains tamper-proof throughout legal proceedings
+                Ensure digital evidence remains integrity-verified throughout legal proceedings
               </p>
             </div>
 

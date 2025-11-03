@@ -241,9 +241,9 @@ export default function Home() {
                   </p>
                   <ul className="text-sm space-y-2 mb-8 text-left">
                     <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />IP watermarking</li>
-                    <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Usage tracking</li>
+                    <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Content protection</li>
                     <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Ownership proof</li>
-                    <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Legal compliance</li>
+                    <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Digital signatures</li>
                   </ul>
                   <Button asChild className="w-full btn-primary">
                     <Link to="/copyright">Protect IP Rights</Link>
@@ -259,12 +259,12 @@ export default function Home() {
                   </div>
                   <h3 className="text-2xl font-bold mb-4">Forensic Evidence</h3>
                   <p className="text-muted-foreground mb-6">
-                    Evidence protection for legal proceedings and forensic investigations with tamper-evident security.
+                    Evidence protection for legal proceedings and forensic investigations with secure embedding.
                   </p>
                   <ul className="text-sm space-y-2 mb-8 text-left">
                     <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Evidence integrity</li>
-                    <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Tamper detection</li>
-                    <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Legal authentication</li>
+                    <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Integrity verification</li>
+                    <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Secure embedding</li>
                     <li className="flex items-center"><ArrowRight className="h-3 w-3 mr-2 text-primary" />Audit trails</li>
                   </ul>
                   <Button asChild className="w-full btn-primary">
