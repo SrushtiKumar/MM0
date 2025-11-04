@@ -32,7 +32,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 
 // API Service Integration
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000/api`;
 
 // Enhanced toast system
 let toastCount = 0;
@@ -632,7 +632,7 @@ const ForensicEvidence = () => {
     }
   };
 
-  // Download forensic extract result with Save As dialog
+  // Download forensic extract result with proper save as functionality
   const downloadForensicResultWithSaveAs = async () => {
     if (!currentOperationId) {
       toast.error("No operation result to download");
@@ -640,59 +640,27 @@ const ForensicEvidence = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/operations/${currentOperationId}/download-forensic`);
-      
-      // If forensic download not available, use standard download
-      if (!response.ok && response.status === 404) {
-        return downloadStandardResultWithSaveAs();
-      }
-      
-      if (!response.ok) {
-        throw new Error(`Failed to download: ${response.statusText}`);
-      }
-
-      const blob = await response.blob();
+      const downloadEndpoint = `${API_BASE_URL}/operations/${currentOperationId}/download-forensic`;
       const defaultFilename = `forensic_evidence_${caseId || Date.now()}.zip`;
       
-      // Check if the File System Access API is supported
-      if ('showSaveFilePicker' in window) {
-        try {
-          // Use the modern File System Access API for Save As dialog
-          const fileHandle = await (window as any).showSaveFilePicker({
-            suggestedName: defaultFilename,
-            types: [
-              {
-                description: 'Forensic Evidence Package',
-                accept: {
-                  'application/zip': ['.zip']
-                }
-              }
-            ]
-          });
-          
-          const writable = await fileHandle.createWritable();
-          await writable.write(blob);
-          await writable.close();
-          
-          toast.success("Forensic evidence package saved successfully!");
-        } catch (err) {
-          // User cancelled or error occurred, fall back to regular download
-          if (err.name !== 'AbortError') {
-            console.warn('Save As failed, falling back to download:', err);
-            downloadBlob(blob, defaultFilename);
-            toast.success("Forensic evidence package downloaded successfully!");
-          }
+      // Try forensic download first, fallback to standard if not available
+      try {
+        const { downloadFromUrl } = await import('@/utils/fileDownload');
+        await downloadFromUrl(
+          downloadEndpoint,
+          defaultFilename,
+          `Forensic evidence package saved as "{filename}"!`
+        );
+      } catch (error: any) {
+        if (error.message.includes('404')) {
+          // Fallback to standard download
+          return downloadStandardResultWithSaveAs();
         }
-      } else {
-        // Fallback for browsers that don't support File System Access API
-        downloadBlob(blob, defaultFilename);
-        toast.success("Forensic evidence package downloaded successfully!");
+        throw error;
       }
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error("Download error:", error);
-      // Fallback to standard download
-      downloadStandardResultWithSaveAs();
+      toast.error(`Download failed: ${error.message}`);
     }
   };
 
@@ -756,7 +724,7 @@ const ForensicEvidence = () => {
     document.body.removeChild(a);
   };
 
-  // Download with Save As dialog (allows user to choose filename and location)
+  // Download with proper save as functionality
   const downloadStandardResultWithSaveAs = async () => {
     if (!currentOperationId) {
       toast.error("No operation ID available for download");
@@ -776,58 +744,18 @@ const ForensicEvidence = () => {
         }
       }
       
-      const response = await fetch(`${API_BASE_URL}/operations/${currentOperationId}/download`);
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error(`Download not found. The operation may still be processing or the file was not created. Status: ${response.status}`);
-        }
-        throw new Error(`Download failed: ${response.status} ${response.statusText}`);
-      }
-
-      const blob = await response.blob();
+      const downloadEndpoint = `${API_BASE_URL}/operations/${currentOperationId}/download`;
       const defaultFilename = operationResult?.filename || `forensic_evidence_${currentOperationId.slice(0, 8)}.png`;
       
-      // Check if the File System Access API is supported
-      if ('showSaveFilePicker' in window) {
-        try {
-          // Use the modern File System Access API for Save As dialog
-          const fileHandle = await (window as any).showSaveFilePicker({
-            suggestedName: defaultFilename,
-            types: [
-              {
-                description: 'Evidence Files',
-                accept: {
-                  'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp'],
-                  'audio/*': ['.wav', '.mp3', '.flac'],
-                  'video/*': ['.mp4', '.avi'],
-                  'application/*': ['.pdf', '.docx'],
-                  'text/*': ['.txt']
-                }
-              }
-            ]
-          });
-          
-          const writable = await fileHandle.createWritable();
-          await writable.write(blob);
-          await writable.close();
-          
-          toast.success("Forensic evidence file saved successfully!");
-        } catch (err) {
-          // User cancelled or error occurred, fall back to regular download
-          if (err.name !== 'AbortError') {
-            console.warn('Save As failed, falling back to download:', err);
-            downloadBlob(blob, defaultFilename);
-            toast.success("Forensic evidence file downloaded successfully!");
-          }
-        }
-      } else {
-        // Fallback for browsers that don't support File System Access API
-        downloadBlob(blob, defaultFilename);
-        toast.success("Forensic evidence file downloaded successfully!");
-      }
+      // Use the utility function for proper save as functionality
+      const { downloadFromUrl } = await import('@/utils/fileDownload');
+      await downloadFromUrl(
+        downloadEndpoint,
+        defaultFilename,
+        `Forensic evidence file saved as "{filename}"!`
+      );
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Download error:", error);
       toast.error(`Failed to download file: ${error.message}`);
       

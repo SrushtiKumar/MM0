@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 
 // API Service Integration
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000/api`;
 
 interface SupportedFormats {
   image: { carrier_formats: string[]; content_formats: string[]; max_size_mb: number; };
@@ -768,7 +768,7 @@ export default function General() {
     poll();
   };
 
-  // Enhanced download with custom save dialog
+  // Enhanced download with proper save as functionality
   const downloadResult = async () => {
     if (!currentOperationId) {
       toast.error("No operation result to download");
@@ -782,135 +782,21 @@ export default function General() {
         ? `${API_BASE_URL}/operations/${currentOperationId}/download-batch`
         : `${API_BASE_URL}/operations/${currentOperationId}/download`;
       
-      const response = await fetch(downloadEndpoint);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to download: ${response.statusText}`);
-      }
-
-      const blob = await response.blob();
-      
       // For batch operations, suggest a ZIP filename
       const defaultFilename = isBatchOperation 
         ? `batch_results_${Date.now()}.zip`
-        : (operationResult?.filename || `result_${Date.now()}`);
+        : (operationResult?.filename || `result_${Date.now()}.bin`);
       
-      // Try to use the modern File System Access API
-      if ('showSaveFilePicker' in window) {
-        try {
-          // Get the file extension from the default filename - handle edge cases
-          const lastDotIndex = defaultFilename.lastIndexOf('.');
-          const extension = (lastDotIndex > 0 && lastDotIndex < defaultFilename.length - 1) 
-            ? defaultFilename.substring(lastDotIndex + 1).toLowerCase()
-            : '';
-          
-          // Handle problematic temporary filenames
-          const cleanFilename = defaultFilename.includes('extracted_tmp') 
-            ? `extracted_file_${Date.now()}.txt`
-            : defaultFilename;
-          
-          const fileTypeMap: { [key: string]: any } = {
-            'mp4': { description: 'MP4 Video', accept: { 'video/mp4': ['.mp4'] } },
-            'avi': { description: 'AVI Video', accept: { 'video/avi': ['.avi'] } },
-            'wav': { description: 'WAV Audio', accept: { 'audio/wav': ['.wav'] } },
-            'mp3': { description: 'MP3 Audio', accept: { 'audio/mp3': ['.mp3'] } },
-            'jpg': { description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg', '.jpeg'] } },
-            'jpeg': { description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg', '.jpeg'] } },
-            'png': { description: 'PNG Image', accept: { 'image/png': ['.png'] } },
-            'pdf': { description: 'PDF Document', accept: { 'application/pdf': ['.pdf'] } },
-            'doc': { description: 'Word Document', accept: { 'application/msword': ['.doc'] } },
-            'docx': { description: 'Word Document', accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } },
-            'txt': { description: 'Text File', accept: { 'text/plain': ['.txt'] } },
-            'zip': { description: 'ZIP Archive', accept: { 'application/zip': ['.zip'] } }
-          };
-
-          // Get file type or create a proper fallback
-          let fileType = fileTypeMap[extension.toLowerCase()];
-          
-          if (!fileType) {
-            // For unknown extensions, create a proper type with the actual extension
-            if (extension && extension.length > 0) {
-              fileType = {
-                description: `${extension.toUpperCase()} File`,
-                accept: { [`application/${extension}`]: [`.${extension}`] }
-              };
-            } else {
-              // If no extension, allow all files but don't specify invalid patterns
-              fileType = {
-                description: 'All Files',
-                accept: { '*/*': [] }
-              };
-            }
-          }
-
-          // Show the save dialog
-          const fileHandle = await (window as any).showSaveFilePicker({
-            suggestedName: cleanFilename,
-            types: [fileType]
-          });
-
-          // Write the file
-          const writableStream = await fileHandle.createWritable();
-          await writableStream.write(blob);
-          await writableStream.close();
-
-          toast.success(`File saved successfully as "${fileHandle.name}"!`);
-        } catch (error: any) {
-          if (error.name === 'AbortError') {
-            toast.error("Save operation was cancelled");
-            return;
-          }
-          throw error; // Fall back to traditional download
-        }
-      } else {
-        // Fallback for browsers that don't support File System Access API
-        // Show a custom dialog for filename input
-        const customFilename = prompt(
-          `Enter filename to save as (current: ${defaultFilename}):`,
-          defaultFilename
-        );
-        
-        if (customFilename === null) {
-          toast.error("Download cancelled");
-          return;
-        }
-
-        const finalFilename = customFilename.trim() || defaultFilename;
-        
-        // Traditional download with custom filename
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = finalFilename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        toast.success(`File downloaded as "${finalFilename}"!`);
-      }
+      // Use the utility function for proper save as functionality
+      const { downloadFromUrl } = await import('@/utils/fileDownload');
+      await downloadFromUrl(
+        downloadEndpoint, 
+        defaultFilename,
+        `File saved successfully as "{filename}"!`
+      );
     } catch (error: any) {
-      // Final fallback - traditional download with original filename
-      if (error.message.includes('File System Access API')) {
-        try {
-          const blob = await (await fetch(`${API_BASE_URL}/operations/${currentOperationId}/download`)).blob();
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = operationResult?.filename || `result_${Date.now()}`;
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-          toast.success("File downloaded successfully (fallback mode)!");
-        } catch (fallbackError: any) {
-          toast.error(fallbackError.message || "Failed to download result");
-          console.error("Download fallback error:", fallbackError);
-        }
-      } else {
-        toast.error(error.message || "Failed to download result");
-        console.error("Download error:", error);
-      }
+      console.error("Download error:", error);
+      toast.error(`Download failed: ${error.message}`);
     }
   };
 

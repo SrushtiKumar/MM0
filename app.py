@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Import our steganography modules
@@ -245,6 +246,22 @@ app = FastAPI(
     title="VeilForge - Advanced Steganography Web Interface",
     description="Hide and extract data in images, audio, video, and documents",
     version="1.0.0"
+)
+
+# Add CORS middleware to allow frontend access from different origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://192.168.1.6:8080",
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+        "http://192.168.1.6:8081"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Mount static files and templates
