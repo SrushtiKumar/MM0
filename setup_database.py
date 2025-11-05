@@ -15,16 +15,21 @@ def setup_database():
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_KEY")
         
-        # Use default values if not set
-        if not supabase_url or supabase_url == "https://your-project-ref.supabase.co":
-            supabase_url = "https://ldhzvzxmnshpboocnpiv.supabase.co"
-            os.environ["SUPABASE_URL"] = supabase_url
-            print(f"Using default SUPABASE_URL: {supabase_url}")
+        # Validate that required environment variables are present
+        if not supabase_url:
+            print("❌ Error: SUPABASE_URL environment variable is required")
+            print("Please set your Supabase URL in the environment variables or .env file")
+            print("Example: SUPABASE_URL=https://your-project-ref.supabase.co")
+            return False
             
-        if not supabase_key or supabase_key == "your-anon-key":
-            supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkaHp2enhtbnNocGJvb2NucGl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg5NjQ1NzYsImV4cCI6MjA3NDU0MDU3Nn0.FR-fWoLFwmRehDZ-06u3mkVNoVg0nO6LiBzd3tqOuAc"
-            os.environ["SUPABASE_KEY"] = supabase_key
-            print(f"Using default SUPABASE_KEY")
+        if not supabase_key:
+            print("❌ Error: SUPABASE_KEY environment variable is required")
+            print("Please set your Supabase anon key in the environment variables or .env file")
+            print("Example: SUPABASE_KEY=your-anon-key-here")
+            return False
+            
+        print(f"✅ Using SUPABASE_URL: {supabase_url[:30]}...")
+        print("✅ Using SUPABASE_KEY: [REDACTED]")
         
         print("🔄 Connecting to Supabase...")
         supabase = get_supabase_client()

@@ -112,12 +112,23 @@ temp.*
 *.log
 logs/
 
-# Environment Variables
+# Environment Variables & Secrets
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env.*
+*_config.json
+secrets.json
+credentials.json
+api-keys.txt
+config/secrets/
+*.pem
+*.key
+*.crt
+supabase_keys.txt
+email_credentials.txt
 
 # Package files
 *.egg-info/
@@ -179,3 +190,44 @@ dmypy.json
 # Application-specific temporary files
 metadata.json
 capacity_report.txt
+node_modules
+
+# =============================================================================
+# DEPLOYMENT CLEANUP - Exclude development/testing files from deployment
+# =============================================================================
+# Development and testing files moved here during deployment preparation
+dev_unused/
+**/dev_unused/
+
+# Additional patterns to keep development files out of production
+test_*.py
+*test*.py
+*demo*.py
+*check*.py
+*debug*.py
+*fix*.py
+*verify*.py
+*validation*.py
+sample_*
+temp_*
+mock_*
+quick_*
+minimal_*
+standalone_*
+run_backend.py
+fixed_backend.py
+minimal_backend.py
+
+# Test data and output files
+*_extracted*
+*_embedded*
+*_stego.*
+*_result.*
+*_output.*
+workflow_*
+integrity_test_*
+step*_result.*
+api_extracted_*
+direct_extracted_*
+user_extraction_result.*
+reliable_web_output_*

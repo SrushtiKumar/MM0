@@ -1,19 +1,30 @@
-// EmailJS Configuration
-// You need to replace these values with your actual EmailJS credentials
+// EmailJS Configuration - SECURED WITH ENVIRONMENT VARIABLES
+// All sensitive values are now loaded from environment variables
 
 export const EMAILJS_CONFIG = {
-  // Your EmailJS public key (found in your EmailJS account settings)
-  PUBLIC_KEY: 'gxZ_jnSYM6BBWevvd', // Replace with your actual public key
+  // Your EmailJS public key (loaded from VITE_EMAILJS_PUBLIC_KEY)
+  PUBLIC_KEY: import.meta.env.VITE_EMAILJS_PUBLIC_KEY || '',
   
-  // Your EmailJS service ID (created in your EmailJS services)  
-  SERVICE_ID: 'service_llf0hhj', // Your actual service ID
+  // Your EmailJS service ID (loaded from VITE_EMAILJS_SERVICE_ID)
+  SERVICE_ID: import.meta.env.VITE_EMAILJS_SERVICE_ID || '',
   
-  // Your EmailJS template ID (created in your EmailJS email templates)
-  TEMPLATE_ID: 'template_nzm50pk', // Replace with your actual template ID
+  // Your EmailJS template ID (loaded from VITE_EMAILJS_TEMPLATE_ID)
+  TEMPLATE_ID: import.meta.env.VITE_EMAILJS_TEMPLATE_ID || '',
   
-  // The recipient email address
-  TO_EMAIL: 'srushti_csd@ksit.edu.in'
+  // The recipient email address (loaded from VITE_RECIPIENT_EMAIL)
+  TO_EMAIL: import.meta.env.VITE_RECIPIENT_EMAIL || 'contact@example.com'
 };
+
+// Validate configuration at runtime
+if (!EMAILJS_CONFIG.PUBLIC_KEY) {
+  console.error('❌ VITE_EMAILJS_PUBLIC_KEY environment variable is required');
+}
+if (!EMAILJS_CONFIG.SERVICE_ID) {
+  console.error('❌ VITE_EMAILJS_SERVICE_ID environment variable is required');
+}
+if (!EMAILJS_CONFIG.TEMPLATE_ID) {
+  console.error('❌ VITE_EMAILJS_TEMPLATE_ID environment variable is required');
+}
 
 // Template variables that will be sent to your email template:
 // {{to_email}} - Recipient email ()

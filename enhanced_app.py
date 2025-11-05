@@ -1,8 +1,15 @@
 """
 Enhanced FastAPI Web Application for React Frontend Integration
 Provides comprehensive API endpoints for the React steganography application
-with Supabase integration
+with Supabase integration - SECURED WITH ENVIRONMENT VARIABLES
 """
+
+# Load environment variables for local development
+try:
+    from env_loader import load_env_file
+    load_env_file()
+except ImportError:
+    pass  # In production, environment variables are provided by the platform
 
 import os
 import tempfile
@@ -20,11 +27,11 @@ import shutil
 from datetime import datetime
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks, Depends
-from fastapi.staticfiles import StaticFiles
+# from fastapi.staticfiles import StaticFiles  # Not needed in Vercel deployment
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-import uvicorn
+import uvicorn  # Used for local development server
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -3299,10 +3306,11 @@ async def list_operations(limit: int = 100):
     
     return {"operations": operations}
 
-@app.get("/forensic-evidence")
-async def serve_forensic_evidence():
-    """Serve the forensic evidence page"""
-    return FileResponse("templates/index.html")
+# @app.get("/forensic-evidence")
+# async def serve_forensic_evidence():
+#     """Serve the forensic evidence page"""
+#     return FileResponse("templates/index.html")
+# NOTE: Commented out for Vercel deployment - frontend handles all UI routing
 
 # ============================================================================
 # CLEANUP AND MAINTENANCE
@@ -3328,11 +3336,30 @@ async def serve_forensic_evidence():
 # MAIN ENTRY POINT
 # ============================================================================
 
+# Local development server - runs when executed directly
+# In Vercel, this is imported as a module so __name__ != "__main__"
 if __name__ == "__main__":
-    uvicorn.run(
-        "enhanced_app:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
-        log_level="info"
-    )
+    try:
+        # Import uvicorn for local development
+        # import uvicorn  # Already imported at top (commented out)
+        import uvicorn
+        
+        print("🚀 Starting VeilForge backend server...")
+        print("📍 Backend API: http://localhost:8000")
+        print("📍 Frontend URL: http://localhost:8080")
+        print("📍 API Documentation: http://localhost:8000/docs")
+        print("🔄 Press Ctrl+C to stop the server")
+        
+        uvicorn.run(
+            "enhanced_app:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=True,  # Enable reload for development
+            log_level="info"
+        )
+    except ImportError:
+        print("❌ uvicorn not available - install with: pip install uvicorn[standard]")
+    except KeyboardInterrupt:
+        print("\n🛑 Server stopped by user")
+    except Exception as e:
+        print(f"❌ Server failed to start: {e}")

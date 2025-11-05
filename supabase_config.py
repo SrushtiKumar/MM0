@@ -4,9 +4,22 @@ Supabase Configuration for Video Steganography Project
 import os
 from supabase import create_client, Client
 
-# Supabase configuration
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ldhzvzxmnshpboocnpiv.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkaHp2enhtbnNocGJvb2NucGl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg5NjQ1NzYsImV4cCI6MjA3NDU0MDU3Nn0.FR-fWoLFwmRehDZ-06u3mkVNoVg0nO6LiBzd3tqOuAc")
+# Supabase configuration - SECURED WITH ENVIRONMENT VARIABLES
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+# Validate that required environment variables are set
+if not SUPABASE_URL:
+    print("❌ CRITICAL: SUPABASE_URL environment variable is required")
+    print("💡 Please check your .env file or environment configuration")
+    print("   Expected format: SUPABASE_URL=https://your-project-ref.supabase.co")
+    raise ValueError("SUPABASE_URL environment variable is required")
+
+if not SUPABASE_KEY:
+    print("❌ CRITICAL: SUPABASE_KEY environment variable is required") 
+    print("💡 Please check your .env file or environment configuration")
+    print("   Expected format: SUPABASE_KEY=your-supabase-anon-key")
+    raise ValueError("SUPABASE_KEY environment variable is required")
 
 def get_supabase_client() -> Client:
     """

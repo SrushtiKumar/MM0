@@ -1,1 +1,0 @@
-This is a comprehensive test of all steganography modules working correctly!

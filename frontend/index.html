@@ -17,11 +17,18 @@
     <!-- EmailJS Library -->
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="text/javascript">
-      // Initialize EmailJS globally
+      // Initialize EmailJS globally with environment variable
       (function() {
         console.log('🔧 Initializing EmailJS globally...');
-        emailjs.init('gxZ_jnSYM6BBWevvd');
-        console.log('✅ EmailJS initialized globally');
+        // Note: In production, this should be loaded from environment variables
+        // For now, this will be handled by the React app's configuration
+        const publicKey = import.meta.env?.VITE_EMAILJS_PUBLIC_KEY || '';
+        if (publicKey) {
+          emailjs.init(publicKey);
+          console.log('✅ EmailJS initialized globally');
+        } else {
+          console.warn('⚠️ EmailJS public key not found in environment variables');
+        }
         
         // Add global test function
         window.testEmailJSGlobal = async function() {
@@ -46,11 +53,21 @@
           
           try {
             console.log('🚀 Sending via global EmailJS...');
+            // Note: These should be loaded from environment variables in production
+            const serviceId = import.meta.env?.VITE_EMAILJS_SERVICE_ID || '';
+            const templateId = import.meta.env?.VITE_EMAILJS_TEMPLATE_ID || '';
+            const publicKey = import.meta.env?.VITE_EMAILJS_PUBLIC_KEY || '';
+            
+            if (!serviceId || !templateId || !publicKey) {
+              console.error('❌ EmailJS configuration missing from environment variables');
+              return;
+            }
+            
             const result = await emailjs.sendForm(
-              'service_llf0hhj',     // Service ID
-              'template_nzm50pk',    // Template ID
+              serviceId,     // Service ID from env
+              templateId,    // Template ID from env  
               form,
-              'gxZ_jnSYM6BBWevvd'   // Public Key
+              publicKey      // Public Key from env
             );
             console.log('✅ SUCCESS!', result);
             alert('✅ Email sent successfully! Check srushti_csd@ksit.edu.in');
