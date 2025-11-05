@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/integrations/supabase/client";
+import { ProjectFileService } from "@/services/projectFileService";
+import { ProjectFilesDisplay } from "@/pages/Dashboard";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { 
@@ -29,8 +32,6 @@ import {
   CheckCircle
 } from "lucide-react";
 
-import { supabase } from "@/integrations/supabase/client";
-
 // API Service Integration
 const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8000/api`;
 
@@ -45,7 +46,7 @@ const toast = {
   },
   error: (message: string) => {
     console.error('❌ ERROR:', message);
-    createToast(message, 'bg-red-500', 5000);
+    createToast(message, 'bg-blue-500', 5000);
   }
 };
 
@@ -92,6 +93,7 @@ function createToast(message: string, bgColor: string, duration: number) {
 
 const ForensicEvidence = () => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Core state
   const [selectedTab, setSelectedTab] = useState("embed");
@@ -122,8 +124,13 @@ const ForensicEvidence = () => {
   const [showExtractedData, setShowExtractedData] = useState(false);
 
   // Project Settings state
+  const [selectedProject, setSelectedProject] = useState<any>(null);
+  const [savedProjects, setSavedProjects] = useState<any[]>([]);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
+
+  // File refresh trigger
+  const [fileRefreshTrigger, setFileRefreshTrigger] = useState(0);
   const [projectTags, setProjectTags] = useState("");
   const [saveProject, setSaveProject] = useState(false);
 
@@ -182,6 +189,90 @@ const ForensicEvidence = () => {
     console.log("🔍 Debug - selectedTab:", selectedTab);
     console.log("🔍 Debug - isProcessing:", isProcessing);
   }, [operationResult, currentOperationId, selectedTab, isProcessing]);
+
+  // Load user projects for forensic operations
+  useEffect(() => {
+    const loadProjects = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Handle newly created project from dashboard
+        if (location.state?.newProject && location.state?.projectJustCreated) {
+          console.log('📦 New forensic project received from dashboard:', location.state.newProject);
+          setSelectedProject(location.state.newProject);
+          setProjectName(location.state.newProject.name);
+          setProjectDescription(location.state.newProject.description || "");
+          setSavedProjects([location.state.newProject]);
+          toast.success(`Welcome to your new ${location.state.newProject.project_type} project!`);
+        }
+        
+        // Handle existing project being opened from dashboard
+        if (location.state?.existingProject && location.state?.projectToOpen) {
+          console.log('🔓 Opening existing forensic project:', location.state.existingProject);
+          const project = location.state.existingProject;
+          
+          setSelectedProject(project);
+          setProjectName(project.name);
+          
+          // Parse description to extract metadata
+          let description = "";
+          let metadata = {};
+          
+          try {
+            if (project.description) {
+              const parsed = JSON.parse(project.description);
+              if (parsed.description !== undefined) {
+                description = parsed.description || "";
+                metadata = parsed.metadata || {};
+              } else {
+                // Legacy format - just a string
+                description = project.description;
+              }
+            }
+          } catch (e) {
+            // Legacy format - just a string
+            description = project.description || "";
+          }
+          
+          setProjectDescription(description);
+          
+          // Restore all project metadata if available
+          if (metadata && typeof metadata === 'object') {
+            console.log('📋 Restoring forensic project metadata:', metadata);
+            const meta = metadata as any;
+            
+            // Forensic-specific fields
+            if (meta.caseId) setCaseId(meta.caseId);
+            if (meta.embeddedOwner) setEmbeddedOwner(meta.embeddedOwner);
+            if (meta.timestamp) setTimestamp(meta.timestamp);
+            if (meta.description) setDescription(meta.description);
+            
+            // Security settings
+            if (meta.password && meta.savePasswordWithProject) {
+              setPassword(meta.password);
+              setSavedPassword(meta.password);
+              setSavePasswordWithProject(true);
+            }
+            
+            // UI preferences
+            if (meta.showPassword !== undefined) setShowPassword(meta.showPassword);
+            if (meta.showExtractedData !== undefined) setShowExtractedData(meta.showExtractedData);
+            
+            // Evidence data
+            if (meta.extractedMetadata) setExtractedMetadata(meta.extractedMetadata);
+            
+            // Operation result
+            if (meta.lastOperationResult) setOperationResult(meta.lastOperationResult);
+          }
+          
+          setSavedProjects([project]);
+          toast.success(`Opened forensic project: ${project.name} with saved evidence data`);
+        }
+        
+        await loadUserProjects(user.id);
+      }
+    };
+    loadProjects();
+  }, []);
   // File handling functions
   const handleCarrierFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -243,6 +334,125 @@ const ForensicEvidence = () => {
       toast.success("Loaded saved password from project!");
     } else {
       toast.error("No saved password found in project settings");
+    }
+  };
+
+  // Project Management Functions
+  const loadUserProjects = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      setSavedProjects(data || []);
+      
+      // Auto-select the first project if available, or create one if none exists
+      // But don't override if a project was just created or opened from dashboard
+      if (data && data.length > 0 && !selectedProject && !location.state?.projectJustCreated && !location.state?.projectToOpen) {
+        setSelectedProject(data[0]);
+        setProjectName(data[0].name);
+        setProjectDescription(data[0].description || "");
+      } else if ((!data || data.length === 0) && !selectedProject) {
+        await createDefaultProject(userId);
+      }
+    } catch (error) {
+      console.error('💥 Error loading forensic projects:', error);
+    }
+  };
+
+  const createDefaultProject = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .insert([
+          {
+            user_id: userId,
+            name: 'Forensic Evidence Project',
+            description: 'Automatically created project for forensic steganography operations',
+            project_type: 'forensic'
+          }
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSavedProjects([data]);
+      setSelectedProject(data);
+      setProjectName(data.name);
+      setProjectDescription(data.description || "");
+      toast.success('Default forensic project created successfully!');
+      
+      return data;
+    } catch (error) {
+      console.error('💥 Error creating default forensic project:', error);
+      toast.error(`Failed to create default project: ${error.message}`);
+    }
+  };
+
+  const saveProjectSettings = async () => {
+    if (!selectedProject || !projectName.trim()) {
+      toast.error("Please enter a project name");
+      return;
+    }
+
+    try {
+      // Create comprehensive metadata object for forensic evidence project
+      const projectMetadata = {
+        // Forensic-specific fields
+        caseId: caseId,
+        embeddedOwner: embeddedOwner,
+        timestamp: timestamp,
+        description: description,
+        
+        // Security settings
+        password: savePasswordWithProject ? password : '',
+        savePasswordWithProject: savePasswordWithProject,
+        
+        // UI preferences
+        showPassword: showPassword,
+        showExtractedData: showExtractedData,
+        
+        // Evidence data
+        extractedMetadata: extractedMetadata,
+        
+        // Last operation details
+        lastOperationResult: operationResult,
+        
+        // Timestamp
+        lastSaved: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('projects')
+        .update({
+          name: projectName.trim(),
+          description: JSON.stringify({
+            description: projectDescription.trim() || null,
+            metadata: projectMetadata
+          }),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedProject.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSelectedProject(data);
+      setSavedProjects(prevProjects => 
+        prevProjects.map(p => p.id === selectedProject.id ? data : p)
+      );
+
+      toast.success("Forensic project settings saved successfully!");
+      console.log('✅ Forensic project settings updated with metadata:', data);
+    } catch (error) {
+      console.error('❌ Error saving forensic project settings:', error);
+      toast.error(`Failed to save project settings: ${error.message}`);
     }
   };
 
@@ -339,6 +549,53 @@ const ForensicEvidence = () => {
 
       const result = await response.json();
       setCurrentOperationId(result.operation_id);
+      
+      // Store uploaded files in project if user is authenticated and project is selected
+      if (currentUser && selectedProject) {
+        try {
+          console.log('💾 Storing files for forensic project:', selectedProject.id);
+          
+          // Store carrier file
+          const storedCarrierFile = await ProjectFileService.storeUploadedFile(
+            selectedProject.id,
+            carrierFile,
+            currentUser.id
+          );
+          console.log('✅ Stored forensic carrier file:', storedCarrierFile);
+          
+          // Store hidden file (evidence)
+          const storedHiddenFile = await ProjectFileService.storeUploadedFile(
+            selectedProject.id,
+            hiddenFile,
+            currentUser.id
+          );
+          console.log('✅ Stored forensic evidence file:', storedHiddenFile);
+          
+          // Create operation record
+          const operation = await ProjectFileService.createOperation(
+            selectedProject.id,
+            currentUser.id,
+            "forensic_embed",
+            undefined, // carrier file ID will be set later
+            undefined, // processed file ID will be set later
+            "forensic_evidence",
+            password.length > 0, // encryption enabled if password provided
+            true, // assume success initially
+            undefined
+          );
+          console.log('✅ Created forensic operation:', operation);
+          
+        } catch (error) {
+          console.error('💥 Error storing forensic files:', error);
+          // Don't fail the operation if file storage fails
+        }
+      } else {
+        console.warn('⚠️ Cannot store files - missing user or project:', {
+          currentUser: !!currentUser,
+          selectedProject: !!selectedProject
+        });
+      }
+      
       toast.success("Forensic embedding operation started successfully!");
       
       // Start polling for progress
@@ -478,6 +735,35 @@ const ForensicEvidence = () => {
 
       const result = await response.json();
       setCurrentOperationId(result.operation_id);
+      
+      // Store uploaded file in project if user is authenticated and project is selected
+      if (currentUser && selectedProject) {
+        try {
+          // Store the stego file being extracted from
+          await ProjectFileService.storeUploadedFile(
+            selectedProject.id,
+            extractFile,
+            currentUser.id
+          );
+          
+          // Create operation record
+          await ProjectFileService.createOperation(
+            selectedProject.id,
+            currentUser.id,
+            "forensic_extract",
+            undefined, // carrier file ID will be set later
+            undefined, // processed file ID will be set later
+            "forensic_evidence", // extracting forensic evidence data
+            false, // extraction doesn't typically involve encryption
+            true, // assume success initially
+            undefined
+          );
+        } catch (error) {
+          console.error('Error storing forensic extraction files:', error);
+          // Don't fail the operation if file storage fails
+        }
+      }
+      
       toast.success("Forensic extraction operation started successfully!");
       
       pollOperationStatus(result.operation_id, true);
@@ -525,6 +811,29 @@ const ForensicEvidence = () => {
           console.log("🎯 Current tab:", selectedTab);
           console.log("🆔 Operation ID:", operationId);
           
+          // Store processed result if user is authenticated and project is selected
+          if (currentUser && selectedProject && status.result) {
+            try {
+              // Create a processed file record
+              const processedFileName = status.result.output_file || "forensic_processed_file";
+              const processedFileUrl = status.result.download_url || "";
+              
+              await ProjectFileService.storeProcessedFile(
+                selectedProject.id,
+                processedFileName,
+                "processed_forensic_result",
+                processedFileUrl,
+                status.result.file_size || 0,
+                currentUser.id,
+                operationId,
+                password ? "forensic_encryption" : undefined
+              );
+            } catch (error) {
+              console.error('Error storing forensic processed file:', error);
+              // Don't fail the operation if file storage fails
+            }
+          }
+          
           // Force set operationResult even if it's null
           if (status.result) {
             setOperationResult(status.result);
@@ -565,6 +874,8 @@ const ForensicEvidence = () => {
             }
           }
           
+          // Trigger file list refresh
+          setFileRefreshTrigger(prev => prev + 1);
           toast.success("Operation completed successfully!");
           return;
         }
@@ -1632,17 +1943,39 @@ Generated by VeilForge Forensic Evidence System
                         }}>
                           Reset
                         </Button>
-                        <Button onClick={() => {
-                          if (saveProject && projectName.trim()) {
-                            toast.success(`Project template "${projectName}" saved successfully!`);
-                          } else {
-                            toast.success("Settings applied successfully!");
-                          }
-                        }}>
-                          Apply Settings
+                        <Button 
+                          onClick={saveProjectSettings}
+                          disabled={!projectName.trim() || !selectedProject}
+                        >
+                          Save Project Settings
+                        </Button>
+                        
+                        <Button 
+                          variant="outline"
+                          onClick={() => {
+                            if (selectedProject) {
+                              window.open('/dashboard', '_blank');
+                              toast.success("Opening dashboard in new tab");
+                            } else {
+                              toast.error("No project selected to save to dashboard");
+                            }
+                          }}
+                        >
+                          Save Project to Dashboard
                         </Button>
                       </div>
                     </div>
+                    
+                    {/* Project Files Display */}
+                    {selectedProject && (
+                      <div className="space-y-3 pt-6 border-t">
+                        <h4 className="text-sm font-semibold flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          Forensic Project Files
+                        </h4>
+                        <ProjectFilesDisplay project={selectedProject} refreshTrigger={fileRefreshTrigger} />
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>

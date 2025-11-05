@@ -23,13 +23,20 @@ export default function Auth() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"success" | "error">("success");
+  const [rememberMe, setRememberMe] = useState(false);
 
   useEffect(() => {
-    // Check if user is already logged in
+    // Check if user has an active session and handle remember me
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
+      const rememberMeFlag = localStorage.getItem('rememberMe');
+      
+      if (session && session.user) {
+        // User has active session, redirect to home
         navigate("/home");
+      } else if (rememberMeFlag !== 'true') {
+        // Only sign out if remember me is not enabled
+        await supabase.auth.signOut();
       }
     };
     checkSession();
@@ -44,6 +51,7 @@ export default function Auth() {
     setMessage("");
     
     try {
+      // Configure session persistence based on remember me option
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -58,6 +66,18 @@ export default function Auth() {
           variant: "destructive",
         });
       } else if (data.session) {
+        // Handle remember me functionality
+        if (rememberMe) {
+          // Store remember me flag persistently
+          localStorage.setItem('rememberMe', 'true');
+        } else {
+          // Store temporary session flag
+          localStorage.setItem('rememberMe', 'false');
+        }
+        
+        // Update user login stats
+        await updateLoginStats(data.user.id);
+        
         toast({
           title: "Welcome back!",
           description: "You have successfully signed in.",
@@ -69,6 +89,27 @@ export default function Auth() {
       setMessageType("error");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const updateLoginStats = async (userId: string) => {
+    try {
+      // Update the profiles table with proper conflict resolution
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({ 
+          user_id: userId,
+          updated_at: new Date().toISOString(),
+          last_sign_in_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id'
+        });
+      
+      if (error) {
+        console.warn('Failed to update login stats:', error);
+      }
+    } catch (error) {
+      console.warn('Login stats update error:', error);
     }
   };
 

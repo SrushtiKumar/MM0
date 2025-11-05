@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/supabase/client";
+import { ProjectFileService } from "@/services/projectFileService";
+import { ProjectFilesDisplay } from "@/pages/Dashboard";
 import { toast } from "sonner";
 import {
   Shield,
@@ -114,6 +116,7 @@ interface OperationResult {
 
 export default function CopyrightProtection() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   // State management
   const [selectedTab, setSelectedTab] = useState("embed");
@@ -141,6 +144,11 @@ export default function CopyrightProtection() {
   const [carrierType, setCarrierType] = useState("image");
   const [encryptionType] = useState("aes-256-gcm"); // Hidden from user, always use AES-256-GCM
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [selectedProject, setSelectedProject] = useState<any>(null);
+  const [savedProjects, setSavedProjects] = useState<any[]>([]);
+
+  // File refresh trigger
+  const [fileRefreshTrigger, setFileRefreshTrigger] = useState(0);
 
   // Project information fields
   const [projectName, setProjectName] = useState("");
@@ -151,17 +159,144 @@ export default function CopyrightProtection() {
     window.scrollTo(0, 0);
     
     // Check authentication and get user
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) {
         navigate("/auth");
       } else {
         setCurrentUser(user);
+        
+        // Handle newly created project from dashboard
+        if (location.state?.newProject && location.state?.projectJustCreated) {
+          console.log('📦 New copyright project received from dashboard:', location.state.newProject);
+          setSelectedProject(location.state.newProject);
+          setProjectName(location.state.newProject.name);
+          setProjectDescription(location.state.newProject.description || "");
+          toast.success(`Welcome to your new ${location.state.newProject.project_type} project!`);
+        }
+        
+        // Handle existing project being opened from dashboard
+        if (location.state?.existingProject && location.state?.projectToOpen) {
+          console.log('🔓 Opening existing copyright project:', location.state.existingProject);
+          const project = location.state.existingProject;
+          
+          setSelectedProject(project);
+          setProjectName(project.name);
+          
+          // Parse description to extract metadata
+          let description = "";
+          let metadata = {};
+          
+          try {
+            if (project.description) {
+              const parsed = JSON.parse(project.description);
+              if (parsed.description !== undefined) {
+                description = parsed.description || "";
+                metadata = parsed.metadata || {};
+              } else {
+                // Legacy format - just a string
+                description = project.description;
+              }
+            }
+          } catch (e) {
+            // Legacy format - just a string
+            description = project.description || "";
+          }
+          
+          setProjectDescription(description);
+          
+          // Restore all project metadata if available
+          if (metadata && typeof metadata === 'object') {
+            console.log('📋 Restoring copyright project metadata:', metadata);
+            const meta = metadata as any;
+            
+            // Copyright-specific fields
+            if (meta.authorName) setAuthorName(meta.authorName);
+            if (meta.timestamp) setTimestamp(meta.timestamp);
+            if (meta.copyrightAlias) setCopyrightAlias(meta.copyrightAlias);
+            
+            // Operation settings
+            if (meta.carrierType) setCarrierType(meta.carrierType);
+            // encryptionType is hardcoded to 'aes-256-gcm' in copyright page
+            
+            // Security settings
+            if (meta.password && meta.savePasswordWithProject) {
+              setPassword(meta.password);
+              setSavedPassword(meta.password);
+              setSavePasswordWithProject(true);
+            }
+            
+            // UI preferences
+            if (meta.showPassword !== undefined) setShowPassword(meta.showPassword);
+            if (meta.batchMode !== undefined) setBatchMode(meta.batchMode);
+            
+            // Operation result
+            if (meta.lastOperationResult) setOperationResult(meta.lastOperationResult);
+          }
+          
+          toast.success(`Opened project: ${project.name} with saved copyright settings`);
+        }
+        
+        // Load user projects
+        await loadUserProjects(user.id);
       }
     });
 
     // Fetch supported formats
     fetchSupportedFormats();
   }, [navigate]);
+
+  const loadUserProjects = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      setSavedProjects(data || []);
+      
+      // Auto-select the first project if available, or create one if none exists
+      // But don't override if a project was just created or opened from dashboard
+      if (data && data.length > 0 && !selectedProject && !location.state?.projectJustCreated && !location.state?.projectToOpen) {
+        setSelectedProject(data[0]);
+        setProjectName(data[0].name);
+        setProjectDescription(data[0].description || "");
+      } else if ((!data || data.length === 0) && !selectedProject) {
+        // Auto-create a default project if none exists
+        await createDefaultProject(userId);
+      }
+    } catch (error) {
+      console.error('Error loading projects:', error);
+    }
+  };
+
+  const createDefaultProject = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .insert([
+          {
+            user_id: userId,
+            name: 'Copyright Protection Project',
+            description: 'Automatically created project for copyright protection operations',
+            project_type: 'copyright'
+          }
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSavedProjects([data]);
+      setSelectedProject(data);
+      toast.success('Project created successfully!');
+    } catch (error) {
+      console.error('Error creating project:', error);
+      toast.error('Failed to create project');
+    }
+  };
 
   // Safe progress setter that prevents backwards movement after completion
   const setSafeProgress = (value: number | ((prev: number) => number)) => {
@@ -258,6 +393,66 @@ export default function CopyrightProtection() {
     }
   };
 
+  const saveProjectSettings = async () => {
+    if (!selectedProject || !projectName.trim()) {
+      toast.error("Please enter a project name");
+      return;
+    }
+
+    try {
+      // Create comprehensive metadata object for copyright protection project
+      const projectMetadata = {
+        // Copyright-specific fields
+        authorName: authorName,
+        timestamp: timestamp,
+        copyrightAlias: copyrightAlias,
+        
+        // Operation settings
+        carrierType: carrierType,
+        encryptionType: encryptionType,
+        
+        // Security settings
+        password: savePasswordWithProject ? password : '',
+        savePasswordWithProject: savePasswordWithProject,
+        
+        // UI preferences
+        showPassword: showPassword,
+        batchMode: batchMode,
+        
+        // Last operation details
+        lastOperationResult: operationResult,
+        
+        // Timestamp
+        lastSaved: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('projects')
+        .update({
+          name: projectName.trim(),
+          description: JSON.stringify({
+            description: projectDescription.trim() || null,
+            metadata: projectMetadata
+          }),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedProject.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update the selected project state
+      setSelectedProject(data);
+
+      toast.success("Project settings saved successfully!");
+      console.log('✅ Copyright project settings updated with metadata:', data);
+    } catch (error) {
+      console.error('❌ Error saving copyright project settings:', error);
+      toast.error(`Failed to save project settings: ${error.message}`);
+    }
+  };
+
   const copyPasswordToClipboard = async () => {
     if (password) {
       try {
@@ -293,6 +488,30 @@ export default function CopyrightProtection() {
         if (status.status === 'completed') {
           stopProgressSimulation();
           setSafeProgress(100); // Ensure it shows 100% on completion
+          
+          // Store processed result if user is authenticated and project is selected
+          if (currentUser && selectedProject && status.result) {
+            try {
+              // Create a processed file record
+              const processedFileName = status.result.output_file || "copyright_processed_file";
+              const processedFileUrl = status.result.download_url || "";
+              
+              await ProjectFileService.storeProcessedFile(
+                selectedProject.id,
+                processedFileName,
+                "processed_copyright_result",
+                processedFileUrl,
+                status.result.file_size || 0,
+                currentUser.id,
+                operationId,
+                encryptionType
+              );
+            } catch (error) {
+              console.error('Error storing copyright processed file:', error);
+              // Don't fail the operation if file storage fails
+            }
+          }
+          
           setTimeout(() => {
             setIsProcessing(false);
             // Set success to true since status is 'completed'
@@ -300,6 +519,8 @@ export default function CopyrightProtection() {
               ...status.result,
               success: true
             });
+            // Trigger file list refresh
+            setFileRefreshTrigger(prev => prev + 1);
             toast.success("Operation completed successfully!");
           }, 500); // Small delay to show 100% before showing results
         } else if (status.status === 'failed') {
@@ -505,6 +726,57 @@ export default function CopyrightProtection() {
       const result = await response.json();
       console.log("✅ API Success:", result);
       setCurrentOperationId(result.operation_id);
+      
+      // Store uploaded files in project if user is authenticated and project is selected
+      if (currentUser && selectedProject) {
+        try {
+          console.log('💾 Storing files for copyright project:', selectedProject.id);
+          
+          if (batchMode) {
+            // Store all carrier files for batch processing
+            for (const file of carrierFiles) {
+              const storedFile = await ProjectFileService.storeUploadedFile(
+                selectedProject.id,
+                file,
+                currentUser.id
+              );
+              console.log('✅ Stored copyright carrier file:', storedFile);
+            }
+          } else {
+            // Store single carrier file
+            const storedFile = await ProjectFileService.storeUploadedFile(
+              selectedProject.id,
+              carrierFile!,
+              currentUser.id
+            );
+            console.log('✅ Stored copyright carrier file:', storedFile);
+          }
+          
+          // Create operation record
+          const operation = await ProjectFileService.createOperation(
+            selectedProject.id,
+            currentUser.id,
+            batchMode ? "batch_copyright_embed" : "copyright_embed",
+            undefined, // carrier file ID will be set later
+            undefined, // processed file ID will be set later
+            "copyright_text",
+            true, // copyright always uses encryption
+            true, // assume success initially
+            undefined
+          );
+          console.log('✅ Created copyright operation:', operation);
+          
+        } catch (error) {
+          console.error('💥 Error storing copyright files:', error);
+          // Don't fail the operation if file storage fails
+        }
+      } else {
+        console.warn('⚠️ Cannot store files - missing user or project:', {
+          currentUser: !!currentUser,
+          selectedProject: !!selectedProject
+        });
+      }
+      
       toast.success("Copyright embedding started successfully!");
       
       // Start polling for progress
@@ -581,6 +853,35 @@ export default function CopyrightProtection() {
 
       const result = await response.json();
       setCurrentOperationId(result.operation_id);
+      
+      // Store uploaded file in project if user is authenticated and project is selected
+      if (currentUser && selectedProject) {
+        try {
+          // Store the stego file being extracted from
+          await ProjectFileService.storeUploadedFile(
+            selectedProject.id,
+            extractFile,
+            currentUser.id
+          );
+          
+          // Create operation record
+          await ProjectFileService.createOperation(
+            selectedProject.id,
+            currentUser.id,
+            "copyright_extract",
+            undefined, // carrier file ID will be set later
+            undefined, // processed file ID will be set later
+            "copyright_text", // extracting copyright data
+            false, // extraction doesn't typically involve encryption
+            true, // assume success initially
+            undefined
+          );
+        } catch (error) {
+          console.error('Error storing copyright extraction files:', error);
+          // Don't fail the operation if file storage fails
+        }
+      }
+      
       toast.success("Copyright extraction started successfully!");
       
       // Start polling for progress
@@ -1273,6 +1574,45 @@ export default function CopyrightProtection() {
                         </div>
                       </div>
                       
+                      {/* Project Actions */}
+                      <div className="space-y-3 pt-4 border-t">
+                        <div className="space-y-2">
+                          <Button 
+                            className="w-full" 
+                            disabled={!projectName.trim() || !selectedProject}
+                            onClick={saveProjectSettings}
+                          >
+                            Save Project Settings
+                          </Button>
+                          
+                          <Button 
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => {
+                              if (selectedProject) {
+                                window.open('/dashboard', '_blank');
+                                toast.success("Opening dashboard in new tab");
+                              } else {
+                                toast.error("No project selected to save to dashboard");
+                              }
+                            }}
+                          >
+                            Save Project to Dashboard
+                          </Button>
+                        </div>
+                        
+                        {/* Project Files Display */}
+                        {selectedProject && (
+                          <div className="space-y-3 pt-4 border-t">
+                            <h4 className="text-sm font-semibold flex items-center gap-2">
+                              <FileText className="h-4 w-4" />
+                              Project Files
+                            </h4>
+                            <ProjectFilesDisplay project={selectedProject} refreshTrigger={fileRefreshTrigger} />
+                          </div>
+                        )}
+                      </div>
+                      
                       <Alert>
                         <Info className="h-4 w-4" />
                         <AlertDescription>
@@ -1307,12 +1647,12 @@ export default function CopyrightProtection() {
                 <Card className="mt-6">
                   <CardContent className="pt-6">
                     <div className="space-y-4">
-                      <Alert className={operationResult.success ? "border-green-200 bg-green-50 dark:bg-green-950/30" : "border-red-200 bg-red-50 dark:bg-red-950/30"}>
+                      <Alert className={operationResult.success ? "border-green-200 bg-green-50 dark:bg-green-950/30" : "border-blue-200 bg-blue-50 dark:bg-blue-950/30"}>
                         <div className="flex items-center gap-2">
                           {operationResult.success ? (
                             <CheckCircle className="h-4 w-4 text-green-600" />
                           ) : (
-                            <AlertTriangle className="h-4 w-4 text-red-600" />
+                            <AlertTriangle className="h-4 w-4 text-blue-600" />
                           )}
                           <span className="font-medium">
                             {operationResult.success ? "Success" : "Failed"}

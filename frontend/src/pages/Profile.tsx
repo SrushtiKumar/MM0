@@ -85,21 +85,38 @@ export default function Profile() {
       // Upload avatar if a new file was selected
       if (avatarFile) {
         const fileExt = avatarFile.name.split('.').pop();
-        const fileName = `${userId}-${Date.now()}.${fileExt}`;
+        const fileName = `${userId}-avatar-${Date.now()}.${fileExt}`;
+        
+        // Create avatars bucket if it doesn't exist
+        const { error: bucketError } = await supabase.storage
+          .createBucket('avatars', {
+            public: true,
+            allowedMimeTypes: ['image/*'],
+            fileSizeLimit: 5242880 // 5MB
+          });
+
+        if (bucketError && !bucketError.message.includes('already exists')) {
+          console.warn('Bucket creation warning:', bucketError);
+        }
+
         const { error: uploadError } = await supabase.storage
-          .from('project-files')
-          .upload(`avatars/${fileName}`, avatarFile);
+          .from('avatars')
+          .upload(fileName, avatarFile, {
+            cacheControl: '3600',
+            upsert: true
+          });
 
         if (uploadError) throw uploadError;
 
         const { data: { publicUrl } } = supabase.storage
-          .from('project-files')
-          .getPublicUrl(`avatars/${fileName}`);
+          .from('avatars')
+          .getPublicUrl(fileName);
 
         avatarUrl = publicUrl;
       }
 
-      const { error } = await supabase
+      // Update both profiles and users tables
+      const { error: profileError } = await supabase
         .from("profiles")
         .update({
           full_name: profile.full_name,
@@ -108,6 +125,8 @@ export default function Profile() {
           updated_at: new Date().toISOString()
         })
         .eq("user_id", userId);
+
+      const error = profileError;
 
       if (error) throw error;
 

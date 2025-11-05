@@ -25,6 +25,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import requests
+
+# Try to import email config, fallback to default if not available
+try:
+    from email_config import EMAIL_CONFIG
+except ImportError:
+    EMAIL_CONFIG = {
+        'SMTP_SERVER': 'smtp.gmail.com',
+        'SMTP_PORT': 587,
+        'EMAIL_USER': '',
+        'EMAIL_PASSWORD': '',
+        'RECIPIENT_EMAIL': 'srushti_csd@ksit.edu.in',
+        'SENDER_NAME': 'VeilForge Contact System',
+        'SUBJECT_TEMPLATE': 'VeilForge Contact: {subject}',
+        'ENABLE_EMAIL': False
+    }
 
 # Import steganography modules with fallbacks
 steganography_managers = {}
@@ -106,6 +125,13 @@ class ProjectRequest(BaseModel):
     name: str = Field(..., description="Project name")
     description: Optional[str] = Field(None, description="Project description")
     project_type: str = Field(default="general", description="Project type")
+
+class ContactRequest(BaseModel):
+    name: str = Field(..., description="Sender's name")
+    email: str = Field(..., description="Sender's email")
+    phone: Optional[str] = Field(None, description="Sender's phone")
+    subject: str = Field(..., description="Message subject")
+    message: str = Field(..., description="Message content")
 
 class OperationResponse(BaseModel):
     success: bool
@@ -567,6 +593,207 @@ async def register_user(user: UserModel, db: Optional[SteganographyDatabase] = D
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/test")
+async def test_endpoint():
+    """Test endpoint to verify backend is working"""
+    return {"status": "Backend is working!", "timestamp": datetime.now().isoformat()}
+
+@app.post("/api/contact")
+async def send_contact_message(contact: ContactRequest):
+    """
+    Send contact form message via email
+    """
+    print("=" * 50)
+    print("🚀 BACKEND: Contact API endpoint hit!")
+    print("=" * 50)
+    
+    try:
+        # Log the message
+        print(f"📧 Contact message received:")
+        print(f"Name: {contact.name}")
+        print(f"Email: {contact.email}")
+        print(f"Phone: {contact.phone}")
+        print(f"Subject: {contact.subject}")
+        print(f"Message: {contact.message}")
+        print("-" * 30)
+        
+        # Try to send actual email using SMTP
+        email_sent = False
+        
+        # Try simple direct email sending
+        try:
+            print("🚀 Attempting direct email sending...")
+            
+            # Simple email setup - REPLACE THESE WITH REAL CREDENTIALS
+            gmail_user = "your_actual_gmail@gmail.com"  # CHANGE THIS
+            gmail_app_password = "your_16_char_app_password"  # CHANGE THIS
+            
+            if gmail_user != "your_actual_gmail@gmail.com" and gmail_app_password != "your_16_char_app_password":
+                print("📧 Trying to send email with configured credentials...")
+                
+                # Create the email
+                msg = MIMEMultipart()
+                msg['From'] = f"VeilForge Contact <{gmail_user}>"
+                msg['To'] = "srushti_csd@ksit.edu.in"
+                msg['Subject'] = f"VeilForge Contact: {contact.subject}"
+                msg['Reply-To'] = contact.email
+                
+                email_body = f"""
+NEW CONTACT FORM MESSAGE:
+
+Name: {contact.name}
+Email: {contact.email}
+Phone: {contact.phone or 'Not provided'}
+Subject: {contact.subject}
+
+Message:
+{contact.message}
+
+---
+Sent from VeilForge Contact Form
+Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Reply directly to: {contact.email}
+"""
+                
+                msg.attach(MIMEText(email_body, 'plain'))
+                
+                # Send via Gmail SMTP
+                server = smtplib.SMTP('smtp.gmail.com', 587)
+                server.starttls()
+                server.login(gmail_user, gmail_app_password)
+                
+                text = msg.as_string()
+                server.sendmail(gmail_user, "srushti_csd@ksit.edu.in", text)
+                server.quit()
+                
+                email_sent = True
+                print("✅ EMAIL SENT SUCCESSFULLY!")
+                print(f"   From: {gmail_user}")
+                print(f"   To: srushti_csd@ksit.edu.in")
+                print(f"   Subject: VeilForge Contact: {contact.subject}")
+                
+            else:
+                print("⚠️ Email credentials not configured")
+                print("📧 To enable email sending:")
+                print("   1. Edit enhanced_app.py")
+                print("   2. Replace gmail_user with your Gmail address")
+                print("   3. Replace gmail_app_password with your Gmail App Password")
+                print("   4. Restart the server")
+                
+        except Exception as email_error:
+            print(f"❌ Email sending failed: {email_error}")
+            print(f"   Error type: {type(email_error).__name__}")
+            email_sent = False
+        
+        # Try SMTP if configured and Formspree didn't work
+        if not email_sent and EMAIL_CONFIG['ENABLE_EMAIL'] and EMAIL_CONFIG['EMAIL_USER'] != 'your_actual_email@gmail.com':
+            try:
+                print("🚀 Attempting SMTP email sending...")
+                
+                # Create email content
+                subject = EMAIL_CONFIG['SUBJECT_TEMPLATE'].format(subject=contact.subject)
+                
+                # Create message
+                msg = MIMEMultipart()
+                msg['From'] = f"{EMAIL_CONFIG['SENDER_NAME']} <{EMAIL_CONFIG['EMAIL_USER']}>"
+                msg['To'] = EMAIL_CONFIG['RECIPIENT_EMAIL']
+                msg['Subject'] = subject
+                msg['Reply-To'] = contact.email
+                
+                # Email body
+                email_body = f"""
+New Contact Form Submission from VeilForge:
+
+Name: {contact.name}
+Email: {contact.email}
+Phone: {contact.phone or 'Not provided'}
+Subject: {contact.subject}
+
+Message:
+{contact.message}
+
+---
+This message was sent through the VeilForge contact form.
+You can reply directly to: {contact.email}
+
+Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+                
+                msg.attach(MIMEText(email_body, 'plain'))
+                
+                # Connect to SMTP server and send
+                server = smtplib.SMTP(EMAIL_CONFIG['SMTP_SERVER'], EMAIL_CONFIG['SMTP_PORT'])
+                server.starttls()
+                server.login(EMAIL_CONFIG['EMAIL_USER'], EMAIL_CONFIG['EMAIL_PASSWORD'])
+                
+                text = msg.as_string()
+                server.sendmail(EMAIL_CONFIG['EMAIL_USER'], EMAIL_CONFIG['RECIPIENT_EMAIL'], text)
+                server.quit()
+                
+                email_sent = True
+                print("✅ Email sent successfully via SMTP!")
+                print(f"  To: {EMAIL_CONFIG['RECIPIENT_EMAIL']}")
+                print(f"  Subject: {subject}")
+                
+            except Exception as smtp_error:
+                print(f"❌ SMTP email failed: {smtp_error}")
+                email_sent = False
+        else:
+            print("⚠️ SMTP not configured or credentials not set")
+            print("📧 Message details logged:")
+            print(f"  Name: {contact.name}")
+            print(f"  Email: {contact.email}")
+            print(f"  Subject: {contact.subject}")
+            print(f"  Message: {contact.message[:100]}...")
+            
+        # Try alternative email service if SMTP fails
+        if not email_sent:
+            try:
+                print("🚀 Trying alternative email notification...")
+                
+                # You could integrate with services like:
+                # - Formspree
+                # - EmailJS
+                # - SendGrid
+                # - Mailgun
+                # - AWS SES
+                
+                # For now, we'll create a detailed log
+                email_log = {
+                    'timestamp': datetime.now().isoformat(),
+                    'name': contact.name,
+                    'email': contact.email,
+                    'phone': contact.phone,
+                    'subject': contact.subject,
+                    'message': contact.message,
+                    'status': 'logged_only'
+                }
+                
+                print("📝 Contact message logged for manual processing:")
+                print(json.dumps(email_log, indent=2))
+                
+            except Exception as alt_error:
+                print(f"❌ Alternative email service failed: {alt_error}")
+        
+        # Return appropriate response based on email status
+        if email_sent:
+            return {
+                "success": True,
+                "message": f"Message sent successfully! We received your inquiry and sent a confirmation to {EMAIL_CONFIG['RECIPIENT_EMAIL']}. We'll get back to you at {contact.email} soon!",
+                "email_sent": True
+            }
+        else:
+            return {
+                "success": True,
+                "message": f"Message received successfully! We have logged your inquiry and will get back to you at {contact.email} within 24 hours.",
+                "email_sent": False,
+                "note": "Email service is currently being configured. Your message has been logged for manual processing."
+            }
+        
+    except Exception as e:
+        print(f"Error processing contact message: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process message")
 
 @app.get("/api/users/{user_id}/operations")
 async def get_user_operations(user_id: str, limit: int = 50, 

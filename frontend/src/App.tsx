@@ -12,7 +12,7 @@ import General from "./pages/General";
 import CopyrightProtection from "./pages/CopyrightProtection";
 import ForensicEvidence from "./pages/ForensicEvidence";
 import Developers from "./pages/Developers";
-import ContactUs from "./pages/ContactUs";
+import Contact from "./pages/Contact";
 import Privacy from "./pages/Privacy";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
@@ -39,7 +39,7 @@ const App = () => (
             <Route path="/copyright" element={<CopyrightProtection />} />
             <Route path="/forensic" element={<ForensicEvidence />} />
             <Route path="/developers" element={<Developers />} />
-            <Route path="/contact" element={<ContactUs />} />
+            <Route path="/contact" element={<Contact />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/profile" element={<Profile />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

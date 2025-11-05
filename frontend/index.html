@@ -13,6 +13,61 @@
 
   <body>
     <div id="root"></div>
+    
+    <!-- EmailJS Library -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script type="text/javascript">
+      // Initialize EmailJS globally
+      (function() {
+        console.log('🔧 Initializing EmailJS globally...');
+        emailjs.init('gxZ_jnSYM6BBWevvd');
+        console.log('✅ EmailJS initialized globally');
+        
+        // Add global test function
+        window.testEmailJSGlobal = async function() {
+          console.log('🧪 Testing EmailJS from global scope...');
+          
+          const form = document.createElement('form');
+          const testData = {
+            name: 'Global Test User',
+            from_name: 'Global Test User',
+            from_email: 'globaltest@example.com',
+            phone: '555-0123',
+            message: 'This is a test from global EmailJS',
+            subject: 'Global EmailJS Test'
+          };
+          
+          Object.keys(testData).forEach(key => {
+            const input = document.createElement('input');
+            input.name = key;
+            input.value = testData[key];
+            form.appendChild(input);
+          });
+          
+          try {
+            console.log('🚀 Sending via global EmailJS...');
+            const result = await emailjs.sendForm(
+              'service_llf0hhj',     // Service ID
+              'template_nzm50pk',    // Template ID
+              form,
+              'gxZ_jnSYM6BBWevvd'   // Public Key
+            );
+            console.log('✅ SUCCESS!', result);
+            alert('✅ Email sent successfully! Check srushti_csd@ksit.edu.in');
+            return true;
+          } catch (error) {
+            console.log('❌ FAILED:', error);
+            alert('❌ Failed: ' + JSON.stringify(error));
+            return false;
+          } finally {
+            form.remove();
+          }
+        };
+        
+        console.log('💡 Global EmailJS test available: testEmailJSGlobal()');
+      })();
+    </script>
+    
     <!-- IMPORTANT: DO NOT REMOVE THIS SCRIPT TAG OR THIS VERY COMMENT! -->
     <script src="https://cdn.gpteng.co/gptengineer.js" type="module"></script>
     <script type="module" src="/src/main.tsx"></script>

@@ -21,32 +21,512 @@ import {
   FolderOpen,
   Activity,
   Clock,
-  BarChart3
+  BarChart3,
+  FileText
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import ProjectManager from "@/components/ProjectManager";
 
+// Helper function to parse project description
+const parseProjectDescription = (description: string | null) => {
+  if (!description) return { description: "", metadata: {} };
+  
+  try {
+    const parsed = JSON.parse(description);
+    if (parsed.description !== undefined) {
+      return {
+        description: parsed.description || "",
+        metadata: parsed.metadata || {}
+      };
+    } else {
+      // Legacy format - just a string
+      return { description: description, metadata: {} };
+    }
+  } catch (e) {
+    // Legacy format - just a string
+    return { description: description, metadata: {} };
+  }
+};
+
+interface ProjectFile {
+  id: string;
+  file_name: string;
+  file_type: string;
+  file_url?: string;
+  file_size?: number;
+  is_carrier?: boolean;
+  is_processed?: boolean;
+  encryption_method?: string;
+  created_at: string;
+}
+
+interface ProjectFilesDisplayProps {
+  project: any;
+}
+
+interface AllProjectFilesDisplayProps {
+  user: any;
+  projects: any[];
+}
+
+function AllProjectFilesDisplay({ user, projects }: AllProjectFilesDisplayProps) {
+  const [allFiles, setAllFiles] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (user) {
+      loadAllProjectFiles();
+    }
+  }, [user, projects]);
+
+  const loadAllProjectFiles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("files")
+        .select(`
+          *,
+          projects(name, project_type)
+        `)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setAllFiles(data || []);
+    } catch (error) {
+      console.error('❌ Error loading all project files:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load project files.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+          <p className="mt-2">Loading files...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileText className="h-5 w-5" />
+          All Project Files
+        </CardTitle>
+        <CardDescription>
+          Files from all your steganography projects ({allFiles.length} total)
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {allFiles.length === 0 ? (
+          <div className="text-center text-muted-foreground py-8">
+            <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <h3 className="text-lg font-semibold mb-2">No Files Yet</h3>
+            <p>Start uploading and processing files to see them here</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {allFiles.map((file) => (
+              <div key={file.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="flex-shrink-0">
+                    {file.is_processed ? (
+                      <Badge variant="default">Processed</Badge>
+                    ) : (
+                      <Badge variant="secondary">Uploaded</Badge>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium">{file.file_name}</p>
+                    <p className="text-sm text-gray-500">
+                      Project: {file.projects?.name || 'Unknown Project'} ({file.projects?.project_type})
+                      {file.file_size && ` • ${(file.file_size / 1024 / 1024).toFixed(2)} MB`}
+                      {file.encryption_method && ` • ${file.encryption_method} encryption`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  {file.file_url && (
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={file.file_url} download target="_blank" rel="noopener noreferrer">
+                        <Download className="h-4 w-4 mr-1" />
+                        Download
+                      </a>
+                    </Button>
+                  )}
+                  <span className="text-xs text-gray-400">
+                    {new Date(file.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface RecentActivityDisplayProps {
+  user: any;
+}
+
+function RecentActivityDisplay({ user }: RecentActivityDisplayProps) {
+  const [activities, setActivities] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (user) {
+      loadRecentActivity();
+    }
+  }, [user]);
+
+  const loadRecentActivity = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("activities")
+        .select(`
+          *,
+          projects(name)
+        `)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+
+      setActivities(data || []);
+    } catch (error) {
+      console.error('❌ Error loading recent activity:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load recent activity.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatActivityType = (type: string) => {
+    switch (type) {
+      case 'embed': return 'Data Embedded';
+      case 'extract': return 'Data Extracted';
+      case 'upload': return 'File Uploaded';
+      default: return type;
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+          <p className="mt-2">Loading activity...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Activity className="h-5 w-5" />
+          Recent Activity
+        </CardTitle>
+        <CardDescription>
+          Your latest steganography operations and project activities
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {activities.length === 0 ? (
+          <div className="text-center text-muted-foreground py-8">
+            <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <h3 className="text-lg font-semibold mb-2">No Recent Activity</h3>
+            <p>Start using steganography features to see your activity here</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {activities.map((activity) => (
+              <div key={activity.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="flex-shrink-0">
+                    <Badge variant="secondary">{formatActivityType(activity.activity_type)}</Badge>
+                  </div>
+                  <div>
+                    <p className="font-medium">{activity.file_name || 'Unknown File'}</p>
+                    <p className="text-sm text-gray-500">
+                      Project: {activity.projects?.name || 'Unknown Project'}
+                      {activity.encryption_method && ` • ${activity.encryption_method} encryption`}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">
+                    {new Date(activity.created_at).toLocaleDateString()}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {new Date(activity.created_at).toLocaleTimeString()}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface ProjectFilesDisplayProps {
+  project: any;
+  refreshTrigger?: number; // Optional prop to trigger refresh
+}
+
+export function ProjectFilesDisplay({ project, refreshTrigger }: ProjectFilesDisplayProps) {
+  const [files, setFiles] = useState<ProjectFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    loadProjectFiles();
+  }, [project.id, refreshTrigger]);
+
+  const loadProjectFiles = async () => {
+    try {
+      setLoading(true);
+      console.log('📁 Loading files for project:', project.id);
+      
+      const { data, error } = await supabase
+        .from('files')
+        .select('*')
+        .eq('project_id', project.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      console.log('📁 Found files:', data);
+      setFiles(data || []);
+    } catch (error) {
+      console.error('❌ Error loading project files:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load project files.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+          <p className="mt-2">Loading files...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Files in {project.name}</CardTitle>
+        <CardDescription>
+          {files.length} files found
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {files.length === 0 ? (
+          <div className="text-center py-8">
+            <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <h3 className="text-lg font-semibold mb-2">No Files Yet</h3>
+            <p className="text-gray-600">
+              Files will appear here when you upload and process them in steganography operations.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {files.map((file) => (
+              <div key={file.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="flex-shrink-0">
+                    {file.is_processed ? (
+                      <Badge variant="default">Processed</Badge>
+                    ) : (
+                      <Badge variant="secondary">Uploaded</Badge>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium">{file.file_name}</p>
+                    <p className="text-sm text-gray-500">
+                      {file.file_size && `${(file.file_size / 1024 / 1024).toFixed(2)} MB`}
+                      {file.encryption_method && ` • ${file.encryption_method} encryption`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  {file.file_url && (
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={file.file_url} download target="_blank" rel="noopener noreferrer">
+                        <Download className="h-4 w-4 mr-1" />
+                        Download
+                      </a>
+                    </Button>
+                  )}
+                  <span className="text-xs text-gray-400">
+                    {new Date(file.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [selectedTab, setSelectedTab] = useState("projects");
+  const [selectedTab, setSelectedTab] = useState("overview");
   const [projects, setProjects] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [currentProject, setCurrentProject] = useState<any>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<any>(null);
+  const [dashboardStats, setDashboardStats] = useState({
+    totalProjects: 0,
+    filesProtected: 0,
+    totalOperations: 0,
+    recentActivity: 0
+  });
 
-  const handleProjectTypeSelect = (type: string) => {
-    setIsProjectModalOpen(false);
-    navigate(`/${type}`);
+  const handleOpenProject = (project: any) => {
+    console.log('🔓 Opening existing project:', project);
+    setCurrentProject(project);
+    navigate(`/${project.project_type}`, { 
+      state: { 
+        existingProject: project,
+        projectToOpen: true
+      } 
+    });
+  };
+
+  const handleProjectTypeSelect = async (type: string) => {
+    if (!user) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to create a project.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Create a new project of the selected type
+      const projectNames = {
+        general: 'General Steganography Project',
+        copyright: 'Copyright Protection Project',
+        forensic: 'Forensic Evidence Project'
+      };
+
+      const projectDescriptions = {
+        general: 'General purpose steganography operations for hiding data in various media files',
+        copyright: 'Copyright protection and digital watermarking project',
+        forensic: 'Forensic steganography for evidence collection and analysis'
+      };
+
+      const { data: newProject, error } = await supabase
+        .from('projects')
+        .insert([
+          {
+            user_id: user.id,
+            name: projectNames[type as keyof typeof projectNames],
+            description: projectDescriptions[type as keyof typeof projectDescriptions],
+            project_type: type
+          }
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Refresh projects list to include the new project
+      await fetchProjects(user.id);
+
+      toast({
+        title: "Project Created",
+        description: `New ${type} project created successfully!`,
+      });
+
+      console.log('✅ New project created:', newProject);
+
+      setIsProjectModalOpen(false);
+      
+      // Navigate to the appropriate page with the new project
+      navigate(`/${type}`, { 
+        state: { 
+          newProject: newProject,
+          projectJustCreated: true
+        } 
+      });
+    } catch (error) {
+      console.error('❌ Error creating project:', error);
+      toast({
+        title: "Error",
+        description: `Failed to create ${type} project: ${error.message}`,
+        variant: "destructive",
+      });
+    }
   };
 
   useEffect(() => {
     window.scrollTo(0, 0);
-    checkAuthAndFetchProjects();
+    checkAuthAndLoadData();
+    
+    // Refresh data when page becomes visible (user returns from other pages)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        console.log('📊 Dashboard: Page became visible, refreshing data...');
+        checkAuthAndLoadData();
+      }
+    };
+    
+    const handleFocus = () => {
+      console.log('📊 Dashboard: Window focused, refreshing data...');
+      checkAuthAndLoadData();
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
-  const checkAuthAndFetchProjects = async () => {
+  const checkAuthAndLoadData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     
     if (!user) {
@@ -55,21 +535,58 @@ export default function Dashboard() {
     }
 
     setUser(user);
-    await fetchProjects(user.id);
+    await Promise.all([
+      fetchProjects(user.id),
+      fetchDashboardStats(user.id)
+    ]);
   };
 
   const fetchProjects = async (userId: string) => {
     try {
+      console.log('📊 Dashboard: Fetching projects for user:', userId);
+      
       const { data, error } = await supabase
         .from("projects")
         .select("*")
         .eq("user_id", userId)
-        .order("created_at", { ascending: false });
+        .order("updated_at", { ascending: false });
+
+      console.log('📊 Dashboard: Projects query result:', { data, error });
 
       if (error) throw error;
-      setProjects(data || []);
+      
+      // Fetch statistics for each project
+      const projectsWithStats = await Promise.all((data || []).map(async (project) => {
+        const [filesCount, operationsCount] = await Promise.all([
+          // Count files for this project
+          supabase
+            .from("files")
+            .select("id", { count: 'exact' })
+            .eq("project_id", project.id),
+          // Count activities/operations for this project
+          supabase
+            .from("activities")
+            .select("id", { count: 'exact' })
+            .eq("project_id", project.id)
+        ]);
+
+        return {
+          ...project,
+          files_protected: filesCount.count || 0,
+          total_operations: operationsCount.count || 0
+        };
+      }));
+      
+      setProjects(projectsWithStats);
+      console.log('📊 Dashboard: Set projects with stats:', projectsWithStats);
+      
+      // Set first project as current if none selected
+      if (projectsWithStats && projectsWithStats.length > 0 && !currentProject) {
+        setCurrentProject(projectsWithStats[0]);
+        console.log('📊 Dashboard: Set current project:', projectsWithStats[0]);
+      }
     } catch (error) {
-      console.error("Error fetching projects:", error);
+      console.error("❌ Dashboard: Error fetching projects:", error);
       toast({
         title: "Error",
         description: "Failed to load projects.",
@@ -80,8 +597,133 @@ export default function Dashboard() {
     }
   };
 
+  const fetchDashboardStats = async (userId: string) => {
+    try {
+      // Get project statistics
+      const { data: projectData, error: projectError } = await supabase
+        .from("projects")
+        .select("id, name")
+        .eq("user_id", userId);
+
+      if (projectError) throw projectError;
+
+      // Get files count for the user
+      const { data: filesData, error: filesError } = await supabase
+        .from("files")
+        .select("id")
+        .eq("user_id", userId);
+
+      if (filesError) throw filesError;
+
+      // Get recent operations count (last 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      const { data: recentOps, error: opsError } = await supabase
+        .from("activities")
+        .select("id")
+        .eq("user_id", userId)
+        .gte("created_at", sevenDaysAgo.toISOString());
+
+      if (opsError) throw opsError;
+
+      // Get total operations count
+      const { data: allOps, error: allOpsError } = await supabase
+        .from("activities")
+        .select("id")
+        .eq("user_id", userId);
+
+      if (allOpsError) throw allOpsError;
+
+      // Calculate totals
+      const totalProjects = projectData?.length || 0;
+      const filesProtected = filesData?.length || 0;
+      const totalOperations = allOps?.length || 0;
+      const recentActivity = recentOps?.length || 0;
+
+      setDashboardStats({
+        totalProjects,
+        filesProtected,
+        totalOperations,
+        recentActivity
+      });
+
+    } catch (error) {
+      console.error("Error fetching dashboard stats:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const createQuickProject = async () => {
+    try {
+      if (!user) return;
+
+      const projectName = `Project ${new Date().toLocaleDateString()}`;
+      
+      const { data, error } = await supabase
+        .from('projects')
+        .insert([
+          {
+            user_id: user.id,
+            name: projectName,
+            description: 'Auto-created project',
+            project_type: 'general'
+          }
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating project:', error);
+        throw error;
+      }
+
+      // Refresh projects list
+      await fetchProjects(user.id);
+      setCurrentProject(data);
+      
+      toast({
+        title: "Project Created",
+        description: `${projectName} has been created successfully.`,
+      });
+
+      return data;
+    } catch (error) {
+      console.error("Error creating project:", error);
+      toast({
+        title: "Error",
+        description: "Failed to create project.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleDeleteProject = async (projectId: string) => {
     try {
+      // First delete associated files
+      const { error: filesError } = await supabase
+        .from("files")
+        .delete()
+        .eq("project_id", projectId);
+
+      if (filesError) {
+        console.warn("Error deleting project files:", filesError);
+        // Continue with project deletion even if files deletion fails
+      }
+
+      // Delete associated activities
+      const { error: activitiesError } = await supabase
+        .from("activities")
+        .delete()
+        .eq("project_id", projectId);
+
+      if (activitiesError) {
+        console.warn("Error deleting project activities:", activitiesError);
+        // Continue with project deletion even if activities deletion fails
+      }
+
+      // Finally delete the project itself
       const { error } = await supabase
         .from("projects")
         .delete()
@@ -92,7 +734,7 @@ export default function Dashboard() {
       setProjects(projects.filter(p => p.id !== projectId));
       toast({
         title: "Project Deleted",
-        description: "Project has been deleted successfully.",
+        description: "Project and all associated data have been deleted successfully.",
       });
     } catch (error) {
       console.error("Error deleting project:", error);
@@ -102,6 +744,24 @@ export default function Dashboard() {
         variant: "destructive",
       });
     }
+  };
+
+  const handleDeleteClick = (project: any) => {
+    setProjectToDelete(project);
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (projectToDelete) {
+      await handleDeleteProject(projectToDelete.id);
+      setDeleteConfirmOpen(false);
+      setProjectToDelete(null);
+    }
+  };
+
+  const cancelDelete = () => {
+    setDeleteConfirmOpen(false);
+    setProjectToDelete(null);
   };
 
   const formatDate = (dateString: string) => {
@@ -141,9 +801,9 @@ export default function Dashboard() {
   };
 
   const stats = {
-    totalProjects: projects.length,
-    activeProjects: projects.length,
-    processedFiles: 0
+    totalProjects: dashboardStats.totalProjects,
+    activeProjects: dashboardStats.totalProjects,
+    processedFiles: dashboardStats.filesProtected
   };
 
   return (
@@ -282,100 +942,118 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Projects List */}
+        {/* Projects Management */}
         <section className="py-8">
           <div className="container">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold">My Projects</h2>
-            </div>
-            
-            {isLoading ? (
-              <div className="text-center py-12">
-                <p className="text-muted-foreground">Loading projects...</p>
-              </div>
-            ) : projects.length === 0 ? (
-              <Card className="text-center py-12">
-                <CardContent>
-                  <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No Projects Yet</h3>
-                  <p className="text-muted-foreground mb-6">
-                    Create your first project to start protecting your data
-                  </p>
-                  <Button onClick={() => navigate('/general')} className="btn-primary">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Create Project
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-6">
-                {projects.map((project, index) => (
-                  <Card key={project.id} className={`animate-fade-in hover:shadow-lg transition-all duration-300`} style={{ animationDelay: `${index * 100}ms` }}>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-1">
-                          <CardTitle className="flex items-center gap-2">
-                            {getTypeIcon(project.project_type)}
-                            {project.name}
-                          </CardTitle>
-                          <div className="flex items-center gap-2">
-                            <Badge className={`text-xs ${getTypeBadgeColor(project.project_type)}`}>
-                              {project.project_type}
-                            </Badge>
+            <ProjectManager 
+              onProjectSelect={setCurrentProject}
+              currentProject={currentProject}
+              projects={projects}
+              onRefreshProjects={() => user && fetchProjects(user.id)}
+            />
+          </div>
+        </section>
+
+        {/* Tabs for Additional Features */}
+        <section className="py-8">
+          <div className="container">
+            <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="activity">Recent Activity</TabsTrigger>
+                <TabsTrigger value="files">Project Files</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="overview" className="space-y-6">
+                <div className="grid gap-6">
+                  {projects.length > 0 && projects.map((project, index) => {
+                    const { description } = parseProjectDescription(project.description);
+                    return (
+                      <Card key={project.id} className="animate-fade-in hover:shadow-lg transition-all duration-300">
+                        <CardHeader>
+                          <CardTitle>{project.name}</CardTitle>
+                          <CardDescription>{description}</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex justify-between items-center">
+                            <div className="text-sm text-muted-foreground">
+                              Files Protected: {project.files_protected} | Operations: {project.total_operations}
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => handleOpenProject(project)}
+                              >
+                                <FolderOpen className="h-4 w-4 mr-1" />
+                                Open Project
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleDeleteClick(project)}
+                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => handleDeleteProject(project.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    
-                    <CardContent className="space-y-4">
-                      {project.description && (
-                        <p className="text-sm text-muted-foreground">{project.description}</p>
-                      )}
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="font-medium text-muted-foreground mb-1">Created</p>
-                          <p className="flex items-center">
-                            <Calendar className="h-3 w-3 mr-1" />
-                            {formatDate(project.created_at)}
-                          </p>
-                        </div>
-                        
-                        <div>
-                          <p className="font-medium text-muted-foreground mb-1">Last Updated</p>
-                          <p className="flex items-center">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {formatDate(project.updated_at)}
-                          </p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-end pt-2 border-t border-border">
-                        <Button variant="outline" size="sm" asChild>
-                          <Link to={`/${project.project_type}`}>
-                            Open Project
-                          </Link>
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="activity" className="space-y-4">
+                <RecentActivityDisplay user={user} />
+              </TabsContent>
+              
+              <TabsContent value="files" className="space-y-4">
+                <AllProjectFilesDisplay user={user} projects={projects} />
+              </TabsContent>
+            </Tabs>
           </div>
         </section>
       </main>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center space-x-2">
+              <Trash2 className="h-5 w-5 text-blue-600" />
+              <span>Delete Project</span>
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the project "{projectToDelete?.name}"? 
+              <br />
+              <span className="text-blue-600 font-medium">
+                This action cannot be undone and will permanently remove all project data, files, and settings.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end space-x-2 mt-4">
+            <Button 
+              variant="outline" 
+              onClick={cancelDelete}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={confirmDelete}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete Project
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       
       <Footer />
     </div>
   );
 }
+

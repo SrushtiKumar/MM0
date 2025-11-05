@@ -1,298 +1,273 @@
-
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { MapPin, Phone, Mail, Clock, Send, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { useToast } from "@/hooks/use-toast";
+import { Mail, MessageSquare, Phone, MapPin } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import emailjs from "@emailjs/browser";
+import { EMAILJS_CONFIG } from "@/config/emailjs-config";
 
-export default function Contact() {
-  const { t } = useLanguage();
+const ContactUs = () => {
+  const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
-    phone: "",
     subject: "",
-    message: ""
+    message: "",
+    rating: 5,
   });
-  
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  
-  useEffect(() => {
-    // Scroll to top when component mounts
-    window.scrollTo(0, 0);
-  }, []);
-  
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-  
-  const handleSubmit = (e: React.FormEvent) => {
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // In a real app, this would send the form data to a server
-    console.log("Form submitted:", formData);
-    
-    setIsSubmitted(true);
-    
-    // Reset form after 3 seconds
-    setTimeout(() => {
-      setIsSubmitted(false);
-      setFormData({
-        name: "",
-        email: "",
-        phone: "",
-        subject: "",
-        message: ""
+    setIsSubmitting(true);
+
+    try {
+      const templateParams = {
+        from_name: formData.name,
+        from_email: formData.email,
+        subject: formData.subject,
+        message: formData.message,
+        rating: formData.rating,
+        to_email: EMAILJS_CONFIG.TO_EMAIL,
+      };
+
+      await emailjs.send(
+        EMAILJS_CONFIG.SERVICE_ID,
+        EMAILJS_CONFIG.TEMPLATE_ID,
+        templateParams,
+        EMAILJS_CONFIG.PUBLIC_KEY
+      );
+
+      toast({
+        title: "Message Sent Successfully!",
+        description: "Thank you for your feedback. We'll get back to you as soon as possible.",
       });
-    }, 3000);
+
+      setFormData({ name: "", email: "", subject: "", message: "", rating: 5 });
+    } catch (error) {
+      console.error("EmailJS Error:", error);
+      toast({
+        title: "Message Failed to Send",
+        description: "Please try again later or contact us directly via email.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
-  
+
+  const faqs = [
+    {
+      question: "How secure is VeilForge?",
+      answer:
+        "VeilForge uses industry-standard encryption and advanced steganography techniques to ensure maximum security for your embedded data.",
+    },
+    {
+      question: "What file formats are supported?",
+      answer:
+        "Currently, VeilForge supports images (PNG, JPG), audio files, and documents. We're continuously adding support for more formats.",
+    },
+    {
+      question: "Can I recover embedded data without a password?",
+      answer:
+        "No, the password is essential for extraction. We use strong encryption, so without the correct password, the embedded data cannot be recovered.",
+    },
+    {
+      question: "Is there a file size limit?",
+      answer:
+        "File size limits depend on your account type. Check your dashboard for specific limits.",
+    },
+  ];
+
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen bg-background">
       <Navbar />
-      
-      <main className="flex-1 pt-20">
-        {/* Header Section */}
-        <section className="relative py-20 bg-gradient-to-r from-sea-light to-white dark:from-sea-dark dark:to-background overflow-hidden">
-          <div className="container relative z-10">
-            <div className="max-w-3xl mx-auto text-center animate-fade-in">
-              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
-                {t.contact.title}
-              </h1>
-              <p className="text-muted-foreground text-lg mb-6">
-                {t.contact.subtitle}
-              </p>
-            </div>
+
+      <main className="container mx-auto px-4 py-24">
+        <div className="max-w-6xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-16 animate-fade-in">
+            <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
+              Get in Touch
+            </h1>
+            <p className="text-xl text-muted-foreground">
+              Have questions or feedback? We'd love to hear from you
+            </p>
           </div>
-          
-          {/* Decorative elements */}
-          <div className="absolute top-0 right-0 w-1/3 h-full opacity-10">
-            <div className="absolute top-10 right-10 w-64 h-64 rounded-full bg-primary/50 blur-3xl" />
-            <div className="absolute bottom-10 right-40 w-48 h-48 rounded-full bg-sea-light blur-3xl" />
-          </div>
-        </section>
-        
-        {/* Contact Information & Form */}
-        <section className="section">
-          <div className="container">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-              {/* Contact Information */}
-              <div className="animate-fade-in [animation-delay:100ms]">
-                <h2 className="text-2xl font-bold mb-6">{t.contact.getInTouch}</h2>
-                
-                <div className="glass-card p-6 space-y-6 mb-8">
-                  <div className="flex items-start">
-                    <div className="flex-shrink-0 h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center mr-4">
-                      <MapPin className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold mb-1">{t.contact.address}</h3>
-                      <p className="text-muted-foreground">
-                        7th sem CSD, KSIT,<br />
-                        Bengaluru-560109
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-start">
-                    <div className="flex-shrink-0 h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center mr-4">
-                      <Phone className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold mb-1">{t.contact.phone}</h3>
-                      <p className="text-muted-foreground">+91 998xxxxx9</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-start">
-                    <div className="flex-shrink-0 h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center mr-4">
-                      <Mail className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold mb-1">{t.contact.email}</h3>
-                      <p className="text-muted-foreground">info@maresereno.com</p>
-                      <p className="text-muted-foreground">reservations@maresereno.com</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-start">
-                    <div className="flex-shrink-0 h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center mr-4">
-                      <Clock className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold mb-1">{t.contact.receptionHours}</h3>
-                      <p className="text-muted-foreground">
-                        Monday - Sunday: 24 hours<br />
-                        {t.contact.checkInTime}<br />
-                        {t.contact.checkOutTime}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="aspect-video rounded-xl overflow-hidden">
-                  <iframe 
-                    src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d387191.03606358136!2d14.165818971864153!3d40.85529294646443!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x133b0a3c328d896b%3A0x309e11f99628150!2sGulf%20of%20Naples!5e0!3m2!1sen!2sus!4v1628613152777!5m2!1sen!2sus" 
-                    width="100%" 
-                    height="100%" 
-                    style={{ border: 0 }} 
-                    allowFullScreen 
-                    loading="lazy"
-                    title="Location Map"
+
+          <div className="grid lg:grid-cols-2 gap-12 mb-16">
+            {/* Contact Form */}
+            <div className="space-y-6">
+              <h2 className="text-3xl font-bold mb-6">Send us a Message</h2>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="name">Name</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
                   />
                 </div>
+
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="subject">Subject</Label>
+                  <Input
+                    id="subject"
+                    value={formData.subject}
+                    onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="message">Message</Label>
+                  <Textarea
+                    id="message"
+                    rows={6}
+                    value={formData.message}
+                    onChange={(e) => setFormData({ ...formData, message: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="rating">Rate your experience (1-5 stars)</Label>
+                  <div className="flex items-center space-x-2 mt-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, rating: star })}
+                        className={`text-2xl ${
+                          star <= formData.rating
+                            ? "text-yellow-400 hover:text-yellow-500"
+                            : "text-gray-300 hover:text-gray-400"
+                        } transition-colors`}
+                      >
+                        ★
+                      </button>
+                    ))}
+                    <span className="ml-2 text-sm text-muted-foreground">
+                      ({formData.rating} star{formData.rating !== 1 ? "s" : ""})
+                    </span>
+                  </div>
+                </div>
+
+                <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting ? "Sending..." : "Send Message"}
+                </Button>
+              </form>
+            </div>
+
+            {/* Contact Info */}
+            <div className="space-y-8">
+              <h2 className="text-3xl font-bold mb-6">Contact Information</h2>
+
+              <div className="space-y-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Mail className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold mb-1">Email</h3>
+                    <p className="text-muted-foreground">support@veilforge.com</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Phone className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold mb-1">Phone</h3>
+                    <p className="text-muted-foreground">+91 998xxxxx9</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <MapPin className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold mb-1">Address</h3>
+                    <p className="text-muted-foreground">
+                      7th sem CSD, KSIT,
+                      <br />
+                      Bengaluru-560109
+                    </p>
+                  </div>
+                </div>
               </div>
-              
-              {/* Contact Form */}
-              <div className="animate-fade-in [animation-delay:300ms]">
-                <h2 className="text-2xl font-bold mb-6">{t.contact.sendMessage}</h2>
-                
-                <div className="glass-card p-6">
-                  {!isSubmitted ? (
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="name">{t.contact.fullName}</Label>
-                          <Input 
-                            id="name" 
-                            name="name"
-                            value={formData.name}
-                            onChange={handleInputChange}
-                            placeholder="John Doe" 
-                            required 
-                          />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="email">{t.contact.email}</Label>
-                          <Input 
-                            id="email" 
-                            name="email"
-                            type="email"
-                            value={formData.email}
-                            onChange={handleInputChange}
-                            placeholder="john@example.com" 
-                            required 
-                          />
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="phone">{t.contact.phoneNumber}</Label>
-                          <Input 
-                            id="phone" 
-                            name="phone"
-                            value={formData.phone}
-                            onChange={handleInputChange}
-                            placeholder="+1 234 567 8900" 
-                          />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label htmlFor="subject">{t.contact.subject}</Label>
-                          <Input 
-                            id="subject" 
-                            name="subject"
-                            value={formData.subject}
-                            onChange={handleInputChange}
-                            placeholder="Reservation Inquiry" 
-                            required 
-                          />
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <Label htmlFor="message">{t.contact.message}</Label>
-                        <textarea 
-                          id="message" 
-                          name="message"
-                          value={formData.message}
-                          onChange={handleInputChange}
-                          placeholder={t.contact.howCanWeHelp} 
-                          className="w-full min-h-[150px] p-3 rounded-md border border-input bg-background"
-                          required 
-                        />
-                      </div>
-                      
-                      <Button type="submit" className="w-full btn-primary">
-                        <Send className="mr-2 h-4 w-4" />
-                        {t.contact.send}
-                      </Button>
-                    </form>
-                  ) : (
-                    <div className="text-center py-12">
-                      <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
-                      </div>
-                      <h3 className="text-xl font-semibold mb-2">{t.contact.messageSent}</h3>
-                      <p className="text-muted-foreground mb-6">
-                        {t.contact.thankYou}
-                      </p>
-                    </div>
-                  )}
+
+              {/* User Reviews */}
+              <div className="mt-12 p-6 rounded-lg border bg-card">
+                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-primary" />
+                  What Our Users Say
+                </h3>
+                <div className="space-y-4">
+                  <div className="border-l-2 border-primary pl-4">
+                    <p className="text-muted-foreground italic mb-2">
+                      "VeilForge's steganography capabilities are truly impressive. Perfect for protecting sensitive information!"
+                    </p>
+                    <p className="text-sm font-medium">- Security Researcher</p>
+                  </div>
+                  <div className="border-l-2 border-primary pl-4">
+                    <p className="text-muted-foreground italic mb-2">
+                      "The invisible watermarking feature helped us protect our copyright with ease."
+                    </p>
+                    <p className="text-sm font-medium">- Digital Content Creator</p>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </section>
-        
-        {/* FAQ Section */}
-        <section className="section bg-muted">
-          <div className="container">
-            <div className="max-w-3xl mx-auto text-center mb-12 animate-fade-in">
-              <h2 className="text-3xl font-bold mb-4">{t.contact.faq}</h2>
-              <p className="text-muted-foreground">
-                {t.contact.faqSubtitle}
-              </p>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in [animation-delay:200ms]">
-              {[
-                {
-                  questionKey: "checkInOut",
-                  icon: <Clock className="h-5 w-5 text-primary" />
-                },
-                {
-                  questionKey: "parking",
-                  icon: <MapPin className="h-5 w-5 text-primary" />
-                },
-                {
-                  questionKey: "pets",
-                  icon: <MapPin className="h-5 w-5 text-primary" />
-                },
-                {
-                  questionKey: "breakfast",
-                  icon: <MapPin className="h-5 w-5 text-primary" />
-                },
-                {
-                  questionKey: "transfers",
-                  icon: <MapPin className="h-5 w-5 text-primary" />
-                },
-                {
-                  questionKey: "amenities",
-                  icon: <MapPin className="h-5 w-5 text-primary" />
-                },
-              ].map((faq, index) => (
-                <div key={index} className="glass-card p-6">
-                  <h3 className="font-semibold text-lg mb-2">
-                    {t.contact.questions[faq.questionKey].question}
-                  </h3>
-                  <p className="text-muted-foreground">
-                    {t.contact.questions[faq.questionKey].answer}
-                  </p>
-                </div>
+
+          {/* FAQs */}
+          <section className="max-w-3xl mx-auto">
+            <h2 className="text-3xl font-bold mb-8 text-center">
+              Frequently Asked Questions
+            </h2>
+            <Accordion type="single" collapsible className="w-full">
+              {faqs.map((faq, index) => (
+                <AccordionItem key={index} value={`item-${index}`}>
+                  <AccordionTrigger className="text-left">
+                    {faq.question}
+                  </AccordionTrigger>
+                  <AccordionContent className="text-muted-foreground">
+                    {faq.answer}
+                  </AccordionContent>
+                </AccordionItem>
               ))}
-            </div>
-          </div>
-        </section>
+            </Accordion>
+          </section>
+        </div>
       </main>
-      
+
       <Footer />
     </div>
   );
-}
+};
+
+export default ContactUs;

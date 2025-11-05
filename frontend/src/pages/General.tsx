@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
+import { ProjectFileService } from "@/services/projectFileService";
+import { ProjectFilesDisplay } from "@/pages/Dashboard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -54,7 +56,7 @@ const toast = {
   },
   error: (message: string) => {
     console.error('❌ ERROR:', message);
-    createToast(message, 'bg-red-500', 5000);
+    createToast(message, 'bg-blue-500', 5000);
   }
 };
 
@@ -107,6 +109,7 @@ function createToast(message: string, bgColor: string, duration: number) {
 
 export default function General() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [selectedTab, setSelectedTab] = useState("embed");
   const [carrierFile, setCarrierFile] = useState<File | null>(null);
   const [carrierFiles, setCarrierFiles] = useState<File[]>([]); // Multiple carrier files
@@ -133,6 +136,7 @@ export default function General() {
   const [apiHealth, setApiHealth] = useState<any>(null);
   
   // Project Settings State
+  const [selectedProject, setSelectedProject] = useState<any>(null);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [saveProject, setSaveProject] = useState(false);
@@ -149,6 +153,9 @@ export default function General() {
   const [estimateType, setEstimateType] = useState<"carrier" | "content">("carrier");
   const [estimateResult, setEstimateResult] = useState<any>(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
+
+  // File refresh trigger
+  const [fileRefreshTrigger, setFileRefreshTrigger] = useState(0);
 
   // Safe progress setter that prevents backwards movement after completion
   const setSafeProgress = (value: number | ((prev: number) => number)) => {
@@ -193,6 +200,83 @@ export default function General() {
 
         // Load API health and supported formats
         await loadApiData();
+        
+        // Handle newly created project from dashboard
+        if (location.state?.newProject && location.state?.projectJustCreated) {
+          console.log('📦 New project received from dashboard:', location.state.newProject);
+          setSelectedProject(location.state.newProject);
+          setProjectName(location.state.newProject.name);
+          setProjectDescription(location.state.newProject.description || "");
+          setSavedProjects([location.state.newProject]);
+          toast.success(`Welcome to your new ${location.state.newProject.project_type} project!`);
+        }
+        
+        // Handle existing project being opened from dashboard
+        if (location.state?.existingProject && location.state?.projectToOpen) {
+          console.log('🔓 Opening existing project:', location.state.existingProject);
+          const project = location.state.existingProject;
+          
+          setSelectedProject(project);
+          setProjectName(project.name);
+          
+          // Parse description to extract metadata
+          let description = "";
+          let metadata = {};
+          
+          try {
+            if (project.description) {
+              const parsed = JSON.parse(project.description);
+              if (parsed.description !== undefined) {
+                description = parsed.description || "";
+                metadata = parsed.metadata || {};
+              } else {
+                // Legacy format - just a string
+                description = project.description;
+              }
+            }
+          } catch (e) {
+            // Legacy format - just a string
+            description = project.description || "";
+          }
+          
+          setProjectDescription(description);
+          
+          // Restore all project metadata if available
+          if (metadata && typeof metadata === 'object') {
+            console.log('📋 Restoring project metadata:', metadata);
+            const meta = metadata as any;
+            
+            // General project settings
+            if (meta.tags) setProjectTags(meta.tags);
+            
+            // Operation settings
+            if (meta.carrierType) setCarrierType(meta.carrierType);
+            if (meta.encryptionType) setEncryptionType(meta.encryptionType);
+            if (meta.contentType) setContentType(meta.contentType);
+            if (meta.textContent) setTextContent(meta.textContent);
+            
+            // Security settings
+            if (meta.password && meta.savePasswordWithProject) {
+              setPassword(meta.password);
+              setSavedPassword(meta.password);
+              setSavePasswordWithProject(true);
+            }
+            
+            // UI preferences
+            if (meta.showPassword !== undefined) setShowPassword(meta.showPassword);
+            if (meta.batchMode !== undefined) setBatchMode(meta.batchMode);
+            
+            // Operation result
+            if (meta.lastOperationResult) setOperationResult(meta.lastOperationResult);
+          }
+          
+          toast.success(`Opened project: ${project.name} with saved settings`);
+        }
+        
+        // Load user projects
+        if (user) {
+          await loadUserProjects(user.id);
+        }
       } catch (error) {
         console.error("Initialization error:", error);
         toast.error("Failed to initialize application");
@@ -244,6 +328,75 @@ export default function General() {
         stack: error.stack
       });
       toast.error("Backend API not available. Some features may not work.");
+    }
+  };
+
+  const loadUserProjects = async (userId: string) => {
+    try {
+      console.log('🔍 Loading projects for user:', userId);
+      
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('❌ Supabase projects query error:', error);
+        throw error;
+      }
+
+      console.log('📊 Projects loaded:', data);
+      setSavedProjects(data || []);
+      
+      // Auto-select the first project if available, or create one if none exists
+      // But don't override if a project was just created or opened from dashboard
+      if (data && data.length > 0 && !selectedProject && !location.state?.projectJustCreated && !location.state?.projectToOpen) {
+        console.log('✅ Selected existing project:', data[0]);
+        setSelectedProject(data[0]);
+        setProjectName(data[0].name);
+        setProjectDescription(data[0].description || "");
+      } else if ((!data || data.length === 0) && !selectedProject) {
+        console.log('🆕 No projects found, creating default project...');
+        // Auto-create a default project if none exists
+        await createDefaultProject(userId);
+      }
+    } catch (error) {
+      console.error('💥 Error loading projects:', error);
+    }
+  };
+
+  const createDefaultProject = async (userId: string) => {
+    try {
+      console.log('🚀 Creating default project for user:', userId);
+      
+      const { data, error } = await supabase
+        .from('projects')
+        .insert([
+          {
+            user_id: userId,
+            name: 'Default Project',
+            description: 'Automatically created project for steganography operations',
+            project_type: 'general'
+          }
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Supabase project creation error:', error);
+        throw error;
+      }
+
+      console.log('✅ Project created successfully:', data);
+      setSavedProjects([data]);
+      setSelectedProject(data);
+      toast.success('Default project created successfully!');
+      
+      return data;
+    } catch (error) {
+      console.error('💥 Error creating default project:', error);
+      toast.error(`Failed to create default project: ${error.message}`);
     }
   };
 
@@ -446,6 +599,71 @@ export default function General() {
     }
   };
 
+  const saveProjectSettings = async () => {
+    if (!selectedProject || !projectName.trim()) {
+      toast.error("Please select a project and enter a project name");
+      return;
+    }
+
+    try {
+      // Create comprehensive metadata object for general steganography project
+      const projectMetadata = {
+        // General project settings
+        tags: projectTags,
+        
+        // Operation settings
+        carrierType: carrierType,
+        encryptionType: encryptionType,
+        contentType: contentType,
+        textContent: contentType === 'text' ? textContent : '',
+        
+        // Security settings
+        password: savePasswordWithProject ? password : '',
+        savePasswordWithProject: savePasswordWithProject,
+        
+        // UI preferences
+        showPassword: showPassword,
+        batchMode: batchMode,
+        
+        // Last operation details
+        lastOperationResult: operationResult,
+        
+        // Timestamp
+        lastSaved: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('projects')
+        .update({
+          name: projectName.trim(),
+          description: JSON.stringify({
+            description: projectDescription.trim() || null,
+            metadata: projectMetadata
+          }),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedProject.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update the selected project state
+      setSelectedProject(data);
+      
+      // Update the projects list
+      setSavedProjects(prevProjects => 
+        prevProjects.map(p => p.id === selectedProject.id ? data : p)
+      );
+
+      toast.success("Project settings saved successfully!");
+      console.log('✅ Project settings updated with metadata:', data);
+    } catch (error) {
+      console.error('❌ Error saving project settings:', error);
+      toast.error(`Failed to save project settings: ${error.message}`);
+    }
+  };
+
   const validateFile = (file: File, type: string) => {
     if (!supportedFormats) return true;
 
@@ -586,6 +804,67 @@ export default function General() {
 
       const result = await response.json();
       setCurrentOperationId(result.operation_id);
+      
+      // Store uploaded files in project if user is authenticated and project is selected
+      if (currentUser && selectedProject) {
+        try {
+          console.log('💾 Storing files for project:', selectedProject.id);
+          
+          if (batchMode) {
+            // Store all carrier files for batch processing
+            for (const file of carrierFiles) {
+              const storedFile = await ProjectFileService.storeUploadedFile(
+                selectedProject.id,
+                file,
+                currentUser.id
+              );
+              console.log('✅ Stored carrier file:', storedFile);
+            }
+          } else {
+            // Store single carrier file
+            const storedFile = await ProjectFileService.storeUploadedFile(
+              selectedProject.id,
+              carrierFile!,
+              currentUser.id
+            );
+            console.log('✅ Stored carrier file:', storedFile);
+          }
+          
+          // Store content file if it exists
+          if (fileContent) {
+            const storedContentFile = await ProjectFileService.storeUploadedFile(
+              selectedProject.id,
+              fileContent,
+              currentUser.id
+            );
+            console.log('✅ Stored content file:', storedContentFile);
+          }
+          
+          // Create operation record
+          const operation = await ProjectFileService.createOperation(
+            selectedProject.id,
+            currentUser.id,
+            batchMode ? "batch_embed" : "embed",
+            undefined, // carrier file ID will be set later
+            undefined, // processed file ID will be set later
+            contentType,
+            encryptionType !== "none",
+            true, // assume success initially
+            undefined
+          );
+          console.log('✅ Created operation:', operation);
+          
+        } catch (error) {
+          console.error('💥 Error storing files:', error);
+          // Don't fail the operation if file storage fails
+        }
+      } else {
+        console.warn('⚠️ Cannot store files - missing user or project:', {
+          currentUser: !!currentUser,
+          selectedProject: !!selectedProject
+        });
+      }
+      
       toast.success("Embedding operation started successfully!");
       
       // Start polling for progress
@@ -664,6 +943,35 @@ export default function General() {
 
       const result = await response.json();
       setCurrentOperationId(result.operation_id);
+      
+      // Store uploaded file in project if user is authenticated and project is selected
+      if (currentUser && selectedProject) {
+        try {
+          // Store the stego file being extracted from
+          await ProjectFileService.storeUploadedFile(
+            selectedProject.id,
+            extractFile,
+            currentUser.id
+          );
+          
+          // Create operation record
+          await ProjectFileService.createOperation(
+            selectedProject.id,
+            currentUser.id,
+            "extract",
+            undefined, // carrier file ID will be set later
+            undefined, // processed file ID will be set later
+            "unknown", // payload type is unknown until extraction
+            false, // extraction doesn't typically involve encryption
+            true, // assume success initially
+            undefined
+          );
+        } catch (error) {
+          console.error('Error storing extraction files:', error);
+          // Don't fail the operation if file storage fails
+        }
+      }
+      
       toast.success("Extraction operation started successfully!");
       
       // Start polling for progress
@@ -720,10 +1028,35 @@ export default function General() {
           stopProgressSimulation();
           setSafeProgress(100);
           
+          // Store processed result if user is authenticated and project is selected
+          if (currentUser && selectedProject && status.result) {
+            try {
+              // Create a processed file record
+              const processedFileName = status.result.output_file || "processed_file";
+              const processedFileUrl = status.result.download_url || "";
+              
+              await ProjectFileService.storeProcessedFile(
+                selectedProject.id,
+                processedFileName,
+                "processed_steganography_result",
+                processedFileUrl,
+                status.result.file_size || 0,
+                currentUser.id,
+                operationId,
+                encryptionType
+              );
+            } catch (error) {
+              console.error('Error storing processed file:', error);
+              // Don't fail the operation if file storage fails
+            }
+          }
+          
           // Wait a moment for the progress bar to reach 100%
           setTimeout(() => {
             setIsProcessing(false);
             setOperationResult(status.result);
+            // Trigger file list refresh
+            setFileRefreshTrigger(prev => prev + 1);
             toast.success("Operation completed successfully!");
           }, 500);
           return;
@@ -1058,7 +1391,7 @@ export default function General() {
                                   </span>
                                   <button
                                     onClick={() => removeCarrierFile(index)}
-                                    className="text-red-500 hover:text-red-700 text-xs"
+                                    className="text-blue-500 hover:text-blue-700 text-xs"
                                   >
                                     ×
                                   </button>
@@ -1586,6 +1919,24 @@ export default function General() {
                       <div className="space-y-6">
                         <h3 className="text-lg font-semibold">Project Information</h3>
                         
+                        {/* Current Project Display */}
+                        {selectedProject && (
+                          <div className="space-y-2">
+                            <Label>Current Project</Label>
+                            <div className="p-3 border rounded-lg bg-muted/50">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-medium">{selectedProject.name}</p>
+                                  <p className="text-sm text-muted-foreground">
+                                    Type: {selectedProject.project_type} • ID: {selectedProject.id}
+                                  </p>
+                                </div>
+                                <Badge variant="secondary">{selectedProject.project_type}</Badge>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        
                         <div className="space-y-2">
                           <Label htmlFor="project-name-tab">Project Name</Label>
                           <Input
@@ -1768,12 +2119,23 @@ export default function General() {
                           </div>
                         )}
                         
+                        {/* Project Files */}
+                        {selectedProject && (
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-semibold flex items-center gap-2">
+                              <FileText className="h-4 w-4" />
+                              Project Files
+                            </h4>
+                            <ProjectFilesDisplay project={selectedProject} refreshTrigger={fileRefreshTrigger} />
+                          </div>
+                        )}
+                        
                         {/* Project Actions */}
                         <div className="space-y-2">
                           <Button 
                             className="w-full" 
-                            disabled={!projectName.trim()}
-                            onClick={() => toast.success("Project settings saved!")}
+                            disabled={!projectName.trim() || !selectedProject}
+                            onClick={saveProjectSettings}
                           >
                             Save Project Settings
                           </Button>

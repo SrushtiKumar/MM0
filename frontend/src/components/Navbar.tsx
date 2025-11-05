@@ -5,7 +5,9 @@ import { Menu, X, LogOut, Mail, Code, UserCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ThemeToggle from "./ThemeToggle";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
+import { SessionManager } from "@/utils/sessionManager";
 import logo from "@/assets/logo.png";
 
 export default function Navbar() {
@@ -13,6 +15,7 @@ export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   useEffect(() => {
     // Check current auth state
@@ -56,15 +59,19 @@ export default function Navbar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, [scrolled]);
   
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate("/");
+  const handleLogoutClick = () => {
+    setLogoutConfirmOpen(true);
+  };
+
+  const confirmLogout = async () => {
+    setLogoutConfirmOpen(false);
+    await SessionManager.handleLogout();
   };
 
   return <header className={cn("fixed top-0 left-0 right-0 z-50 transition-all duration-300", scrolled ? "bg-white/80 dark:bg-card/80 backdrop-blur-lg py-1 shadow-md" : "bg-transparent py-1.5")}>
       <nav className="container flex justify-between items-center">
         <div className="flex items-center space-x-8">
-          <Link to={user ? "/home" : "/"} className="flex items-center">
+          <Link to="/" className="flex items-center">
             <img src={logo} alt="VeilForge Logo" className="h-14 w-auto" />
           </Link>
           
@@ -96,7 +103,7 @@ export default function Navbar() {
             </Button>
           ))}
           {user ? (
-            <Button onClick={handleLogout} variant="ghost" size="icon">
+            <Button onClick={handleLogoutClick} variant="ghost" size="icon">
               <LogOut className="h-4 w-4" />
             </Button>
           ) : (
@@ -148,7 +155,7 @@ export default function Navbar() {
             
             <div className="space-y-3">
               {user ? (
-                <Button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} variant="outline" className="w-full">
+                <Button onClick={() => { handleLogoutClick(); setMobileMenuOpen(false); }} variant="outline" className="w-full">
                   <LogOut className="mr-2 h-4 w-4" />
                   Logout
                 </Button>
@@ -163,5 +170,25 @@ export default function Navbar() {
           </div>
         </div>
       </div>
+
+      {/* Logout Confirmation Dialog */}
+      <Dialog open={logoutConfirmOpen} onOpenChange={setLogoutConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Logout</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to logout? You will be redirected to the login page.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLogoutConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmLogout}>
+              Logout
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>;
 }
